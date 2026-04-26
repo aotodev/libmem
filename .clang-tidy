@@ -1,0 +1,93 @@
+---
+# clang-tidy configuration for libmem.
+#
+# Curated for a C++26 low-level allocator/container library.
+#
+# Notable disables (rationale):
+#   bugprone-easily-swappable-parameters        too pedantic for low-level APIs
+#   cppcoreguidelines-owning-memory             library manages raw memory by design
+#   cppcoreguidelines-avoid-do-while            false positives on macro patterns
+#   cppcoreguidelines-pro-type-union-access     not used, but overly strict
+#   cppcoreguidelines-pro-type-vararg           va_args not used, but blocks gtest macros
+#   cppcoreguidelines-avoid-c-arrays            raw arrays used intentionally in low-level code
+#   modernize-use-trailing-return-type          matter of style, not safer
+#   modernize-use-nodiscard                     applied manually where meaningful
+#   modernize-use-designated-initializers       not always clearer for small aggregates
+#   modernize-avoid-c-arrays                    alias of cppcoreguidelines-avoid-c-arrays
+#   performance-no-int-to-ptr                   intentional in allocator pointer arithmetic
+#   performance-enum-size                       overly pedantic for this codebase
+#   readability-magic-numbers                   noisy on alignments, bit widths, sizes
+#   readability-identifier-length               too pedantic (i, n, p are fine)
+#   readability-function-cognitive-complexity   not actionable as a single metric
+#   misc-include-cleaner                        too aggressive with C++20 modules
+#   misc-no-recursion                           recursion is fine where used
+#   cert-err33-c                                excessive — flags every unchecked stdlib call
+
+Checks: "-*,
+bugprone-*,
+-bugprone-easily-swappable-parameters,
+cert-*,
+-cert-err33-c,
+clang-analyzer-*,
+concurrency-*,
+cppcoreguidelines-*,
+-cppcoreguidelines-owning-memory,
+-cppcoreguidelines-avoid-do-while,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-cppcoreguidelines-avoid-c-arrays,
+google-build-namespaces,
+google-default-arguments,
+google-explicit-constructor,
+google-global-names-in-headers,
+misc-const-correctness,
+misc-definitions-in-headers,
+misc-misplaced-const,
+misc-redundant-expression,
+misc-static-assert,
+-misc-include-cleaner,
+-misc-no-recursion,
+performance-*,
+-performance-enum-size,
+-performance-no-int-to-ptr,
+portability-*,
+readability-identifier-naming,
+readability-avoid-nested-conditional-operator,
+readability-avoid-const-params-in-decls,
+readability-const-return-type,
+readability-duplicate-include,
+readability-else-after-return,
+readability-enum-initial-value,
+readability-make-member-function-const,
+readability-non-const-parameter,
+readability-qualified-auto,
+readability-simplify-boolean-expr,
+readability-static-accessed-through-instance,
+readability-static-definition-in-anonymous-namespace,
+-readability-magic-numbers,
+-readability-identifier-length,
+-readability-function-cognitive-complexity,
+modernize-use-*,
+-modernize-use-trailing-return-type,
+-modernize-use-nodiscard,
+-modernize-use-designated-initializers,
+-modernize-avoid-c-arrays"
+
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(src|include|tests)/'
+FormatStyle: file
+
+# naming convention
+CheckOptions:
+  - { key: readability-identifier-naming.DefaultCase,                  value: lower_case }
+  - { key: readability-identifier-naming.VariableCase,                 value: lower_case }
+  - { key: readability-identifier-naming.FunctionCase,                 value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase,                value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,                    value: lower_case }
+  - { key: readability-identifier-naming.GlobalConstexprVariableCase,  value: lower_case }
+  - { key: readability-identifier-naming.StaticConstexprVariableCase,  value: lower_case }
+  - { key: readability-identifier-naming.MacroDefinitionCase,          value: UPPER_CASE }
+  - { key: readability-identifier-naming.TemplateParameterCase,        value: CamelCase }
+  - { key: readability-identifier-naming.ConceptCase,                  value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberCase,            value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,          value: _ }
