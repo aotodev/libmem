@@ -13,15 +13,15 @@
 #pragma once
 
 #if defined(LIBMEM_SHARED)
-    #if defined(_WIN32)
-        #if defined(LIBMEM_BUILDING)
-            #define LIBMEM_EXPORT __declspec(dllexport)
-        #else
-            #define LIBMEM_EXPORT __declspec(dllimport)
-        #endif
-    #else
-        #define LIBMEM_EXPORT __attribute__((visibility("default")))
-    #endif
+#if defined(_WIN32)
+#if defined(LIBMEM_BUILDING)
+#define LIBMEM_EXPORT __declspec(dllexport)
 #else
-    #define LIBMEM_EXPORT
+#define LIBMEM_EXPORT __declspec(dllimport)
+#endif
+#else
+#define LIBMEM_EXPORT __attribute__((visibility("default")))
+#endif
+#else
+#define LIBMEM_EXPORT
 #endif

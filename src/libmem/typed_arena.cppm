@@ -58,8 +58,7 @@ public:
      *        the arena.
      */
     constexpr typed_arena(const std::span<std::byte> buffer, const std::size_t align = default_alignment) noexcept
-        : begin_{buffer.data()}, end_{buffer.data() + buffer.size()}, cursor_{buffer.data()},
-          default_alignment_{align} {
+        : begin_{buffer.data()}, end_{buffer.data() + buffer.size()}, cursor_{buffer.data()}, default_alignment_{align} {
         assert(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
     }
 
@@ -69,8 +68,7 @@ public:
      * @param align Default alignment for untyped allocations.
      */
     explicit typed_arena(const std::size_t size, const std::size_t align = default_alignment)
-        : begin_{new std::byte[size]}, end_{begin_ + size}, cursor_{begin_},
-          default_alignment_{align}, owns_buffer_{true} {
+        : begin_{new std::byte[size]}, end_{begin_ + size}, cursor_{begin_}, default_alignment_{align}, owns_buffer_{true} {
         assert(size > 0);
         assert(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
     }
@@ -79,9 +77,8 @@ public:
     typed_arena& operator=(const typed_arena&) = delete;
 
     constexpr typed_arena(typed_arena&& other) noexcept
-        : begin_{std::exchange(other.begin_, nullptr)}, end_{std::exchange(other.end_, nullptr)},
-          cursor_{std::exchange(other.cursor_, nullptr)}, default_alignment_{other.default_alignment_},
-          owns_buffer_{std::exchange(other.owns_buffer_, false)},
+        : begin_{std::exchange(other.begin_, nullptr)}, end_{std::exchange(other.end_, nullptr)}, cursor_{std::exchange(other.cursor_, nullptr)},
+          default_alignment_{other.default_alignment_}, owns_buffer_{std::exchange(other.owns_buffer_, false)},
           dtor_head_{std::exchange(other.dtor_head_, nullptr)} {}
 
     constexpr typed_arena& operator=(typed_arena&& other) noexcept {
@@ -240,10 +237,7 @@ private:
     static_assert(std::is_trivially_destructible_v<destructor_node>);
 
     /** @brief Type-erased destructor thunk. */
-    template <typename T>
-    static void destroy_impl(void* ptr) noexcept {
-        static_cast<T*>(ptr)->~T();
-    }
+    template <typename T> static void destroy_impl(void* ptr) noexcept { static_cast<T*>(ptr)->~T(); }
 
     std::byte* begin_{};
     std::byte* end_{};

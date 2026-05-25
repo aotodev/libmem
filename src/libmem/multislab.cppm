@@ -38,8 +38,7 @@ namespace libmem {
 
 namespace detail {
 
-template <std::size_t BlockSize, std::uint32_t BlocksPerSlab>
-struct slab_node {
+template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
     using slab_type = slab<BlockSize, BlocksPerSlab>;
 
     slab_type allocator;
@@ -69,8 +68,7 @@ struct slab_node {
  * (completely allocated slabs). On deallocation, full slabs are moved back to
  * active; empty slabs are released based on the shrink policy.
  */
-export template <std::size_t BlockSize, std::uint32_t BlocksPerSlab,
-    memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy>
+export template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy>
     requires valid_block_size<BlockSize> && (BlocksPerSlab > 0)
 class multislab {
     using node_type = detail::slab_node<BlockSize, BlocksPerSlab>;
@@ -93,8 +91,7 @@ public:
     constexpr explicit multislab(Resource resource) noexcept : resource_{std::move(resource)} {}
 
     /** @brief Construct with custom resource and policy. */
-    constexpr multislab(Resource resource, Policy policy) noexcept
-        : resource_{std::move(resource)}, policy_{std::move(policy)} {}
+    constexpr multislab(Resource resource, Policy policy) noexcept : resource_{std::move(resource)}, policy_{std::move(policy)} {}
 
     /** @brief Construct with a custom policy (default resource). */
     constexpr explicit multislab(Policy policy) noexcept : policy_{std::move(policy)} {}
@@ -110,9 +107,8 @@ public:
     multislab& operator=(const multislab&) = delete;
 
     constexpr multislab(multislab&& other) noexcept
-        : resource_{std::move(other.resource_)}, policy_{std::move(other.policy_)},
-          active_{std::exchange(other.active_, nullptr)}, full_{std::exchange(other.full_, nullptr)},
-          slab_count_{std::exchange(other.slab_count_, 0)}, max_slabs_{other.max_slabs_},
+        : resource_{std::move(other.resource_)}, policy_{std::move(other.policy_)}, active_{std::exchange(other.active_, nullptr)},
+          full_{std::exchange(other.full_, nullptr)}, slab_count_{std::exchange(other.slab_count_, 0)}, max_slabs_{other.max_slabs_},
           empty_count_{std::exchange(other.empty_count_, 0)} {}
 
     constexpr multislab& operator=(multislab&& other) noexcept {
@@ -241,8 +237,7 @@ public:
         constexpr iterator() noexcept = default;
 
         /** @brief Construct positioned at the first allocated block in `list`. */
-        constexpr iterator(node_type* list_head, node_type* second_list) noexcept
-            : current_node_{list_head}, second_list_{second_list} {
+        constexpr iterator(node_type* list_head, node_type* second_list) noexcept : current_node_{list_head}, second_list_{second_list} {
             advance_to_valid_node();
         }
 

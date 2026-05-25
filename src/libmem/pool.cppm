@@ -51,15 +51,13 @@ consteval std::size_t round_up_to_multiple(const std::size_t n, const std::size_
  * Rounded up to the cache-line constraint enforced by `valid_block_size`,
  * and never smaller than the alignment requirement of `T`.
  */
-template <typename T>
-inline constexpr std::size_t pool_block_size_v{round_up_to_multiple(std::max(sizeof(T), alignof(T)), cache_line_size)};
+template <typename T> inline constexpr std::size_t pool_block_size_v{round_up_to_multiple(std::max(sizeof(T), alignof(T)), cache_line_size)};
 
 /**
  * @brief Default number of blocks per slab page, targeting a ~16 KiB page
  *        and never going below a small floor to keep growth amortised.
  */
-template <typename T>
-consteval std::uint32_t default_pool_blocks_per_slab() noexcept {
+template <typename T> consteval std::uint32_t default_pool_blocks_per_slab() noexcept {
     constexpr std::size_t target_page_bytes{1 << 14};
     constexpr std::size_t per_block{pool_block_size_v<T>};
     constexpr std::size_t derived{target_page_bytes / per_block};
@@ -81,8 +79,8 @@ consteval std::uint32_t default_pool_blocks_per_slab() noexcept {
  * @tparam Resource       Backing memory resource (see `memory_resource`).
  * @tparam Policy         Empty-slab hysteresis policy (see `shrink_policy`).
  */
-export template <typename T, std::uint32_t BlocksPerSlab = detail::default_pool_blocks_per_slab<T>(),
-    memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy>
+export template <typename T, std::uint32_t BlocksPerSlab = detail::default_pool_blocks_per_slab<T>(), memory_resource Resource = default_resource,
+    shrink_policy Policy = threshold_policy>
     requires std::is_object_v<T> && (BlocksPerSlab > 0)
 class pool {
     using pool_type = multislab<detail::pool_block_size_v<T>, BlocksPerSlab, Resource, Policy>;
@@ -116,8 +114,7 @@ public:
      *
      * @tparam Const When `true`, dereferencing yields `const T&`.
      */
-    template <bool Const>
-    class basic_iterator {
+    template <bool Const> class basic_iterator {
         friend class pool;
         template <bool> friend class basic_iterator;
 
@@ -156,9 +153,7 @@ public:
         }
 
         /** @brief Iterator-to-iterator equality (defaulted on the wrapped iterator). */
-        friend constexpr bool operator==(const basic_iterator& lhs, const basic_iterator& rhs) noexcept {
-            return lhs.inner_ == rhs.inner_;
-        }
+        friend constexpr bool operator==(const basic_iterator& lhs, const basic_iterator& rhs) noexcept { return lhs.inner_ == rhs.inner_; }
 
         /** @brief Heterogeneous (mutable / const) equality. */
         template <bool OtherConst>

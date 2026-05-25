@@ -48,8 +48,7 @@ consteval std::size_t words_for(const std::uint32_t block_count) noexcept {
  * @brief Find the first free (zero) bit across `Words` bitmap words.
  * @return Index of the free bit, or -1 if all bits are set.
  */
-template <std::size_t Words>
-constexpr std::int32_t bitmap_find_free(const std::array<std::uint64_t, Words>& bitmap, const std::uint32_t capacity) noexcept {
+template <std::size_t Words> constexpr std::int32_t bitmap_find_free(const std::array<std::uint64_t, Words>& bitmap, const std::uint32_t capacity) noexcept {
     for (std::size_t i{0}; i < Words; ++i) {
         if (~bitmap[i]) {
             const auto bit = static_cast<std::uint32_t>(std::countr_zero(static_cast<std::uint64_t>(~bitmap[i])));
@@ -63,20 +62,17 @@ constexpr std::int32_t bitmap_find_free(const std::array<std::uint64_t, Words>& 
 }
 
 /** @brief Test whether a bit is set. */
-template <std::size_t Words>
-constexpr bool bitmap_test(const std::array<std::uint64_t, Words>& bitmap, const std::uint32_t index) noexcept {
+template <std::size_t Words> constexpr bool bitmap_test(const std::array<std::uint64_t, Words>& bitmap, const std::uint32_t index) noexcept {
     return (bitmap[index / bitmap_word_bits] & (1ULL << (index & (bitmap_word_bits - 1)))) != 0;
 }
 
 /** @brief Set a bit. */
-template <std::size_t Words>
-constexpr void bitmap_set(std::array<std::uint64_t, Words>& bitmap, const std::uint32_t index) noexcept {
+template <std::size_t Words> constexpr void bitmap_set(std::array<std::uint64_t, Words>& bitmap, const std::uint32_t index) noexcept {
     bitmap[index / bitmap_word_bits] |= (1ULL << (index & (bitmap_word_bits - 1)));
 }
 
 /** @brief Clear a bit. */
-template <std::size_t Words>
-constexpr void bitmap_clear(std::array<std::uint64_t, Words>& bitmap, const std::uint32_t index) noexcept {
+template <std::size_t Words> constexpr void bitmap_clear(std::array<std::uint64_t, Words>& bitmap, const std::uint32_t index) noexcept {
     bitmap[index / bitmap_word_bits] &= ~(1ULL << (index & (bitmap_word_bits - 1)));
 }
 
@@ -205,8 +201,7 @@ public:
 
         constexpr iterator() noexcept = default;
 
-        constexpr iterator(const slab* s, std::uint32_t word_idx, std::uint64_t word) noexcept
-            : slab_{s}, word_idx_{word_idx}, word_{word} {}
+        constexpr iterator(const slab* s, std::uint32_t word_idx, std::uint64_t word) noexcept : slab_{s}, word_idx_{word_idx}, word_{word} {}
 
         constexpr void* operator*() const noexcept {
             const auto bit{static_cast<std::uint32_t>(std::countr_zero(word_))};
@@ -229,9 +224,7 @@ public:
             return tmp;
         }
 
-        constexpr bool operator==(std::default_sentinel_t) const noexcept {
-            return slab_ == nullptr || (!word_ && word_idx_ >= bitmap_words);
-        }
+        constexpr bool operator==(std::default_sentinel_t) const noexcept { return slab_ == nullptr || (!word_ && word_idx_ >= bitmap_words); }
 
         friend constexpr bool operator==(std::default_sentinel_t s, const iterator& it) noexcept { return it == s; }
 
@@ -320,13 +313,10 @@ private:
     std::uint32_t block_count_{};
     std::array<std::uint64_t, bitmap_words> bitmap_{};
 
-    constexpr void* index_to_ptr(const std::uint32_t index) const noexcept {
-        return static_cast<void*>(memory_ + static_cast<std::size_t>(index) * BlockSize);
-    }
+    constexpr void* index_to_ptr(const std::uint32_t index) const noexcept { return static_cast<void*>(memory_ + static_cast<std::size_t>(index) * BlockSize); }
 
     constexpr std::uint32_t ptr_to_index(const void* ptr) const noexcept {
-        return static_cast<std::uint32_t>(
-            (reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
+        return static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
     }
 };
 
