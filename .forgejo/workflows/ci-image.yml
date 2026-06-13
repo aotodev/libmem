@@ -1,0 +1,35 @@
+# Builds and pushes the libmem CI toolchain image.
+#
+# Kept OUT of the per-push test path: it only runs on manual dispatch or a weekly
+# schedule (to pick up newer Arch compilers), so normal CI just pulls the cached
+# image instead of rebuilding it.
+#
+# Building an image needs Docker access, which a containerised runner does not
+# have by default. Run this job on a runner that can reach a Docker daemon —
+# either a `host`-labelled runner whose host has Docker, or a `docker` runner
+# with the socket mounted in. Adjust `runs-on` to match your setup.
+#
+# Required configuration:
+#   vars.CI_IMAGE        full image ref, e.g. git.example.com/<owner>/libmem-ci:latest
+#   vars.REGISTRY        registry host, e.g. git.example.com
+#   secrets.REGISTRY_TOKEN  a token/password with package write scope
+name: ci-image
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 1'  # Mondays 04:00 UTC
+
+jobs:
+  build-push:
+    runs-on: host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Log in to registry
+        run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" |
+            docker login "${{ vars.REGISTRY }}" -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        run: |
+          docker build -f ci/Containerfile -t "${{ vars.CI_IMAGE }}" ci/
+          docker push "${{ vars.CI_IMAGE }}"
