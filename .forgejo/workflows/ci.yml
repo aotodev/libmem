@@ -29,6 +29,9 @@ jobs:
     runs-on: docker
     container:
       image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +52,9 @@ jobs:
     runs-on: docker
     container:
       image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
     steps:
       - uses: actions/checkout@v4
       - name: Build fuzzers
