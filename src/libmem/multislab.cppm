@@ -46,6 +46,10 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
     slab_node* prev{};
     std::uint32_t used{};
     void* raw_memory{};
+    /* Which intrusive list the node currently lives on. Tracked explicitly
+     * because a slab can be full (`used == BlocksPerSlab`) while still on the
+     * active list — full slabs are migrated lazily, on the next allocation. */
+    bool on_full{false};
 
     slab_node(void* mem, const std::size_t mem_size) noexcept : allocator{mem, mem_size}, raw_memory{mem} {}
 };
@@ -179,7 +183,11 @@ public:
         node_type* node{find_owner(ptr)};
         assert(node != nullptr && "pointer not owned by this allocator");
 
-        const bool was_full{node->used == BlocksPerSlab};
+        /* Use the tracked list membership, not the used-count: a full-by-count
+         * slab can still be on the active list, and treating it as full here
+         * would run the full->active relink on a node that is already active,
+         * corrupting both lists. */
+        const bool was_full{node->on_full};
 
         node->allocator.deallocate(ptr);
         node->used--;
@@ -294,6 +302,14 @@ public:
         bool on_second_list_{false};
 
         constexpr void advance_to_valid_node() noexcept {
+            /* If the primary (active) list is empty, start on the second (full)
+             * list — otherwise iteration over an all-full multislab would yield
+             * nothing even though every block is live. */
+            if (!current_node_ && !on_second_list_) {
+                current_node_ = second_list_;
+                on_second_list_ = true;
+            }
+
             /* Skip empty nodes, find first with content. */
             while (current_node_) {
                 if (current_node_->used > 0) {
@@ -434,6 +450,7 @@ private:
             full_->prev = node;
         }
         full_ = node;
+        node->on_full = true;
     }
 
     void move_to_active(node_type* node) noexcept {
@@ -454,6 +471,7 @@ private:
             active_->prev = node;
         }
         active_ = node;
+        node->on_full = false;
     }
 
     void unlink_and_free(node_type* node) noexcept {
