@@ -10,6 +10,7 @@
 #   cppcoreguidelines-pro-type-union-access     not used, but overly strict
 #   cppcoreguidelines-pro-type-vararg           va_args not used, but blocks gtest macros
 #   cppcoreguidelines-avoid-c-arrays            raw arrays used intentionally in low-level code
+#   cppcoreguidelines-avoid-magic-numbers       noisy on alignments, bit widths, sizes
 #   modernize-use-trailing-return-type          matter of style, not safer
 #   modernize-use-nodiscard                     applied manually where meaningful
 #   modernize-use-designated-initializers       not always clearer for small aggregates
@@ -36,6 +37,7 @@ cppcoreguidelines-*,
 -cppcoreguidelines-pro-type-union-access,
 -cppcoreguidelines-pro-type-vararg,
 -cppcoreguidelines-avoid-c-arrays,
+-cppcoreguidelines-avoid-magic-numbers,
 google-build-namespaces,
 google-default-arguments,
 google-explicit-constructor,
