@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 import libmem;
@@ -79,9 +80,9 @@ TEST(TypedArenaTest, destructors_called_in_reverse_order) {
     tracked::reset_counters();
     {
         typed_arena a{4096};
-        a.emplace<tracked>(10);
-        a.emplace<tracked>(20);
-        a.emplace<tracked>(30);
+        std::ignore = a.emplace<tracked>(10);
+        std::ignore = a.emplace<tracked>(20);
+        std::ignore = a.emplace<tracked>(30);
     }
     /* LIFO: 30, 20, 10 */
     ASSERT_EQ(tracked::destruction_order.size(), 3u);
@@ -94,8 +95,8 @@ TEST(TypedArenaTest, reset_calls_destructors_then_recycles) {
     tracked::reset_counters();
 
     typed_arena a{4096};
-    a.emplace<tracked>(1);
-    a.emplace<tracked>(2);
+    std::ignore = a.emplace<tracked>(1);
+    std::ignore = a.emplace<tracked>(2);
     EXPECT_EQ(tracked::alive, 2);
 
     const std::size_t used_before = a.used();
@@ -128,7 +129,7 @@ TEST(TypedArenaTest, trivially_destructible_no_overhead) {
     /* Now emplace a non-trivial type and verify more space is consumed
      * (the destructor_node adds overhead). */
     tracked::reset_counters();
-    a.emplace<tracked>(1);
+    std::ignore = a.emplace<tracked>(1);
     const std::size_t used_after_nontrivial = a.used();
 
     EXPECT_GT(used_after_nontrivial - used_after_trivial, sizeof(tracked));
@@ -149,8 +150,8 @@ TEST(TypedArenaTest, move_construction_transfers_dtors) {
     tracked::reset_counters();
     {
         typed_arena a{4096};
-        a.emplace<tracked>(1);
-        a.emplace<tracked>(2);
+        std::ignore = a.emplace<tracked>(1);
+        std::ignore = a.emplace<tracked>(2);
 
         typed_arena b{std::move(a)};
         EXPECT_EQ(a.capacity(), 0u);
