@@ -1,0 +1,20 @@
+# Toolchain image for libmem CI.
+#
+# Arch is used deliberately: libmem needs a very recent toolchain (C++26 modules
+# + `import std`), and a rolling base tracks the newest clang/gcc. Build once and
+# push to your registry; the test workflow only pulls it.
+#
+#   docker build -t <registry>/<owner>/libmem-ci:latest ci/
+#   docker push  <registry>/<owner>/libmem-ci:latest
+FROM archlinux:latest
+
+RUN pacman -Syu --noconfirm \
+        clang llvm lld \
+        gcc \
+        libc++ libc++abi \
+        cmake ninja \
+        git nodejs \
+    && pacman -Scc --noconfirm
+
+# nodejs: required by JS-based actions (actions/checkout, actions/cache).
+# libc++/libc++abi: hedge so clang's `import std` works regardless of stdlib.
