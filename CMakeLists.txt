@@ -48,6 +48,7 @@ option(LIBMEM_PIC         "Enable Position Independent Code for static library" 
 option(USE_SANITIZERS     "Enable ASan/UBSan in Debug mode"                           ON)
 option(THREAD_SANITIZER   "Enable ThreadSanitizer instead of ASan"                    OFF)
 option(USE_CCACHE         "Enable ccache if installed"                                OFF)
+option(BUILD_FUZZERS      "Build libFuzzer targets (Clang + Debug + sanitizers only)" OFF)
 
 include(CMakeDependentOption)
 
@@ -174,6 +175,9 @@ if(USE_SANITIZERS)
     target_compile_options(project_flags INTERFACE
         $<$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:${THREAD_SANITIZER}>>>:-fsanitize=address,undefined>
         $<$<AND:$<CONFIG:Debug>,$<BOOL:${THREAD_SANITIZER}>>:-fsanitize=thread,undefined>
+        # Make UBSan findings abort (and emit a stack trace) instead of merely
+        # logging and continuing, so tests/CI actually fail on undefined behaviour.
+        $<$<CONFIG:Debug>:-fno-sanitize-recover=undefined>
     )
     target_link_options(project_flags INTERFACE
         $<$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:${THREAD_SANITIZER}>>>:-fsanitize=address,undefined>
@@ -225,5 +229,34 @@ endif()
 # Tests
 # ---------------------------------------------------------------------------------------
 if(BUILD_TESTS)
+    # enable_testing() must run in the top-level scope so CMake emits a root
+    # CTestTestfile.cmake that descends into tests/ — otherwise `ctest` invoked
+    # at the build root discovers nothing (the tests/ include(CTest) only
+    # enables testing for that subdirectory).
+    enable_testing()
     add_subdirectory(tests)
+endif()
+
+# ---------------------------------------------------------------------------------------
+# Fuzzing (libFuzzer)
+#
+# Coverage-guided fuzz targets. Reuses the Debug ASan + UBSan instrumentation and
+# adds SanitizerCoverage to the library (and harnesses) via -fsanitize=fuzzer-no-link;
+# the fuzz executables link the libFuzzer driver with -fsanitize=fuzzer.
+# ---------------------------------------------------------------------------------------
+if(BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "BUILD_FUZZERS requires Clang (libFuzzer).")
+    endif()
+    if(NOT USE_SANITIZERS OR NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+        message(FATAL_ERROR
+            "BUILD_FUZZERS needs a Debug build with USE_SANITIZERS=ON so ASan + UBSan are active. "
+            "Configure with -DCMAKE_BUILD_TYPE=Debug -DBUILD_FUZZERS=ON.")
+    endif()
+
+    # Instrument everything that links project_flags (the library and the
+    # harnesses) for coverage. ASan + UBSan already come from the Debug block.
+    target_compile_options(project_flags INTERFACE -fsanitize=fuzzer-no-link)
+
+    add_subdirectory(fuzz)
 endif()
