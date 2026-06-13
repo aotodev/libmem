@@ -1,5 +1,7 @@
 # libmem
 
+[![CI](https://git.vernizzi.io/vernizzi/libmem/actions/workflows/ci.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/libmem/actions?workflow=ci.yml)
+
 A small, self-contained C++ memory allocator and container library. Built
 entirely with C++23/26 modules (`import std`), serving also as a testbed for
 idiomatic modern C++ -- concepts, `constexpr` everything, deducing `this`,
