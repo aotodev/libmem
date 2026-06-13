@@ -1,0 +1,34 @@
+# Time-boxed libFuzzer smoke run for the multislab harness (Clang).
+name: fuzz
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'fuzz/**'
+      - '**/CMakeLists.txt'
+      - 'cmake/**'
+      - '.forgejo/workflows/**'
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  fuzz-smoke:
+    runs-on: docker
+    container:
+      image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fuzzers
+        run: |
+          CXX=clang++ cmake -G Ninja -B build-fuzz -DCMAKE_BUILD_TYPE=Debug -DBUILD_FUZZERS=ON
+          cmake --build build-fuzz -j
+      - name: Smoke-run multislab fuzzer
+        run: ./build-fuzz/fuzz/fuzz_multislab -max_total_time=60 -print_final_stats=1

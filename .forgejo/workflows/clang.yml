@@ -1,0 +1,37 @@
+# Build + run the test suite with Clang (ASan + UBSan in Debug).
+name: clang
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'tests/**'
+      - 'fuzz/**'
+      - '**/CMakeLists.txt'
+      - 'cmake/**'
+      - '.forgejo/workflows/**'
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: docker
+    container:
+      image: "${{ vars.CI_IMAGE }}"
+      credentials:
+        username: "${{ github.repository_owner }}"
+        password: "${{ secrets.REGISTRY_TOKEN }}"
+    env:
+      ASAN_OPTIONS: detect_leaks=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build and test
+        run: |
+          CXX=clang++ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure

@@ -1,6 +1,8 @@
 # libmem
 
-[![CI](https://git.vernizzi.io/vernizzi/libmem/actions/workflows/ci.yml/badge.svg?branch=master)](https://git.vernizzi.io/vernizzi/libmem/actions?workflow=ci.yml)
+[![gcc](https://img.shields.io/gitea/actions/workflow/status/vernizzi/libmem/gcc.yml?gitea_url=https://git.vernizzi.io&branch=master&label=gcc)](https://git.vernizzi.io/vernizzi/libmem/actions?workflow=gcc.yml)
+[![clang](https://img.shields.io/gitea/actions/workflow/status/vernizzi/libmem/clang.yml?gitea_url=https://git.vernizzi.io&branch=master&label=clang)](https://git.vernizzi.io/vernizzi/libmem/actions?workflow=clang.yml)
+[![fuzz](https://img.shields.io/gitea/actions/workflow/status/vernizzi/libmem/fuzz.yml?gitea_url=https://git.vernizzi.io&branch=master&label=fuzz)](https://git.vernizzi.io/vernizzi/libmem/actions?workflow=fuzz.yml)
 
 A small, self-contained C++ memory allocator and container library. Built
 entirely with C++23/26 modules (`import std`), serving also as a testbed for
