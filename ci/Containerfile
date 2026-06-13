@@ -1,11 +1,8 @@
 # Toolchain image for libmem CI.
 #
 # Arch is used deliberately: libmem needs a very recent toolchain (C++26 modules
-# + `import std`), and a rolling base tracks the newest clang/gcc. Build once and
-# push to your registry; the test workflow only pulls it.
+# + `import std`), and a rolling base tracks the newest clang/gcc.
 #
-#   docker build -t <registry>/<owner>/libmem-ci:latest ci/
-#   docker push  <registry>/<owner>/libmem-ci:latest
 FROM archlinux:latest
 
 RUN pacman -Syu --noconfirm \
