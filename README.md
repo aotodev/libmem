@@ -58,6 +58,26 @@ cmake --build build
 ctest --test-dir build
 ```
 
+## Testing
+
+CI builds and runs the test suite with both **GCC and Clang** on every push
+(see the badges), under **AddressSanitizer + UndefinedBehaviorSanitizer**, on
+by default in Debug via the `USE_SANITIZERS` option, with UBSan set to abort on
+the first finding. After configuring with `-DBUILD_TESTS=ON` (see above), run
+them with `ctest --test-dir build`.
+
+The GoogleTest suites cover `slab`, `multislab`, `arena`, `typed_arena`, and
+`pool`: allocation / exhaustion / reuse, slab growth and empty-slab hysteresis,
+full/active list transitions, iteration, pointer stability, destructor ordering,
+and leak balance (via a counting `memory_resource`).
+
+A coverage-guided **libFuzzer** harness drives the `multislab` allocator under
+ASan + UBSan (`-DBUILD_FUZZERS=ON`, Clang only); CI runs a short, time-boxed
+smoke pass. See [fuzz/README.md](fuzz/README.md).
+
+This is an early-stage library (and a C++26 modules testbed), so treat the above
+as what is exercised today, not a guarantee of exhaustive coverage.
+
 ## Planned
 
 - `sparse_set` -- dense-packed unordered set with O(1) insert/remove/contains.
