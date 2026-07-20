@@ -225,7 +225,7 @@ private:
     /**
      * @brief Intrusive LIFO node recording a single pending destructor.
      *
-     * Trivially destructible itself (16–24 bytes), so it can live inside
+     * Trivially destructible itself (16-24 bytes), so it can live inside
      * the same bump-allocated buffer with no cleanup overhead.
      */
     struct destructor_node {
