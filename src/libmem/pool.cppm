@@ -278,12 +278,15 @@ public:
     template <typename... Args>
         requires std::constructible_from<T, Args...>
     iterator emplace(Args&&... args) {
-        void* mem{pool_.allocate()};
-        assert(mem != nullptr && "pool: backing resource exhausted");
+        /* allocate_at() hands back an iterator already positioned at the new
+         * block, so insertion stays O(1); allocate() + make_iterator() would
+         * pay an O(S) find_owner scan over the slab list on every insert. */
+        const auto alloc{pool_.allocate_at()};
+        assert(alloc.ptr != nullptr && "pool: backing resource exhausted");
 
-        auto* p{::new (mem) T(std::forward<Args>(args)...)};
+        ::new (alloc.ptr) T(std::forward<Args>(args)...);
         ++size_;
-        return iterator{pool_.make_iterator(p)};
+        return iterator{alloc.it};
     }
 
     /** @brief Copy-insert `value`. */

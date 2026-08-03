@@ -118,13 +118,35 @@ public:
      * @brief Allocate a single block.
      * @return Pointer to the allocated block, or `nullptr` if full.
      */
-    [[nodiscard]] constexpr void* allocate() noexcept {
-        const auto index{detail::bitmap_find_free(bitmap_, block_count_)};
-        if (index < 0) [[unlikely]] {
-            return nullptr;
+    [[nodiscard]] constexpr void* allocate() noexcept { return allocate_at().ptr; }
+
+    /**
+     * @brief Result of `allocate_at()`: the block pointer plus its bit-index.
+     *
+     * `ptr == nullptr` means the slab was full, in which case `index` is unspecified.
+     */
+    struct allocation {
+        void* ptr{};
+        std::uint32_t index{};
+    };
+
+    /**
+     * @brief Allocate a single block, also reporting the bit-index it was taken from.
+     *
+     * Callers that need to build an iterator (or otherwise address the block by
+     * index) should prefer this over `allocate()` — the index falls out of the
+     * bitmap scan for free, whereas recovering it afterwards costs another lookup.
+     *
+     * @return `{ptr, index}` on success, `{nullptr, 0}` when the slab is full.
+     */
+    [[nodiscard]] constexpr allocation allocate_at() noexcept {
+        const auto found{detail::bitmap_find_free(bitmap_, block_count_)};
+        if (found < 0) [[unlikely]] {
+            return {};
         }
-        detail::bitmap_set(bitmap_, static_cast<std::uint32_t>(index));
-        return index_to_ptr(static_cast<std::uint32_t>(index));
+        const auto index{static_cast<std::uint32_t>(found)};
+        detail::bitmap_set(bitmap_, index);
+        return {index_to_ptr(index), index};
     }
 
     /**

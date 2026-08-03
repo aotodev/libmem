@@ -23,8 +23,21 @@ namespace libmem {
  * Platform constants
  * ============================================================================ */
 
-/** @brief Cache-line size used for slab block alignment validation. */
-export inline constexpr std::size_t cache_line_size{64};
+/**
+ * @brief Cache-line size used for slab block alignment validation.
+ *
+ * 32-bit ARM (ARMv7 and earlier) uses 32-byte cache lines; everything else we
+ * target uses 64. Note this is the alignment *quantum* for `valid_block_size`,
+ * so raising it would invalidate existing block sizes — it is deliberately not
+ * bumped to 128 on Apple Silicon.
+ */
+export inline constexpr std::size_t cache_line_size{
+#if defined(__arm__) && !defined(__aarch64__)
+    32
+#else
+    64
+#endif
+};
 
 /**
  * @brief Default alignment for raw `allocate(n)` calls — matches the strictest

@@ -139,39 +139,7 @@ public:
      * @brief Allocate a single block.
      * @return Pointer to the block, or `nullptr` if growth is not possible.
      */
-    [[nodiscard]] void* allocate() {
-        if (!active_) [[unlikely]] {
-            if (!grow()) {
-                return nullptr;
-            }
-        }
-
-        node_type* node{active_};
-        void* ptr{node->allocator.allocate()};
-
-        if (!ptr) [[unlikely]] {
-            /* This node is full — move it to the full list. */
-            move_to_full(node);
-
-            /* Grow a new slab and retry. */
-            if (!grow()) {
-                return nullptr;
-            }
-            node = active_;
-            ptr = node->allocator.allocate();
-        }
-
-        if (ptr) [[likely]] {
-            node->used++;
-            if (node->used == 1) {
-                /* Was empty, no longer empty. */
-                if (empty_count_ > 0) {
-                    --empty_count_;
-                }
-            }
-        }
-        return ptr;
-    }
+    [[nodiscard]] void* allocate() { return allocate_raw().ptr; }
 
     /**
      * @brief Release a block previously obtained from `allocate()`.
@@ -361,17 +329,36 @@ public:
         const auto p{reinterpret_cast<std::uintptr_t>(ptr)};
         const auto index{static_cast<std::uint32_t>((p - base) / BlockSize)};
 
-        /* Determine which intrusive list owns `node`. When in the `full_`
-         * list the iterator is already at its "second list" stage. */
-        bool in_full{false};
-        for (node_type* n{full_}; n; n = n->next) {
-            if (n == node) {
-                in_full = true;
-                break;
-            }
-        }
+        return iterator_at(node, index);
+    }
 
-        return iterator{node, in_full ? nullptr : full_, node->allocator.make_iterator(index), in_full};
+    /**
+     * @brief Result of `allocate_at()`: the block pointer plus an iterator
+     *        already positioned at it.
+     *
+     * `ptr == nullptr` means allocation failed, in which case `it` is a
+     * default-constructed (end-equivalent) iterator.
+     */
+    struct allocation {
+        void* ptr{};
+        iterator it{};
+    };
+
+    /**
+     * @brief Allocate a single block and return an iterator positioned at it.
+     *
+     * Equivalent to `allocate()` followed by `make_iterator(ptr)`, but O(1)
+     * instead of O(S): allocation already knows which slab node it took the
+     * block from and which bit-index it used, so neither the `find_owner`
+     * scan nor the bitmap lookup is needed. Prefer this whenever the caller
+     * wants the position — `pool::emplace` is the motivating case.
+     */
+    [[nodiscard]] allocation allocate_at() {
+        const auto raw{allocate_raw()};
+        if (!raw.ptr) [[unlikely]] {
+            return {};
+        }
+        return {raw.ptr, iterator_at(raw.node, raw.index)};
     }
 
     /* ========================================================================
@@ -396,6 +383,68 @@ private:
     /* ========================================================================
      * Internal operations
      * ======================================================================== */
+
+    /** @brief Result of `allocate_raw()`: block pointer plus its owning node and bit-index. */
+    struct raw_allocation {
+        void* ptr{};
+        node_type* node{};
+        std::uint32_t index{};
+    };
+
+    /**
+     * @brief The actual allocation path, retaining the owning node and bit-index.
+     *
+     * `allocate()` discards them; `allocate_at()` uses them to build an iterator
+     * without re-deriving what we already knew.
+     */
+    raw_allocation allocate_raw() {
+        if (!active_) [[unlikely]] {
+            if (!grow()) {
+                return {};
+            }
+        }
+
+        node_type* node{active_};
+        auto alloc{node->allocator.allocate_at()};
+
+        if (!alloc.ptr) [[unlikely]] {
+            /* This node is full — move it to the full list. */
+            move_to_full(node);
+
+            /* Grow a new slab and retry. */
+            if (!grow()) {
+                return {};
+            }
+            node = active_;
+            alloc = node->allocator.allocate_at();
+        }
+
+        if (alloc.ptr) [[likely]] {
+            node->used++;
+            if (node->used == 1) {
+                /* Was empty, no longer empty. */
+                if (empty_count_ > 0) {
+                    --empty_count_;
+                }
+            }
+        } else [[unlikely]] {
+            return {};
+        }
+
+        return {alloc.ptr, node, alloc.index};
+    }
+
+    /**
+     * @brief Build an iterator at `index` within `node`.
+     *
+     * `node->on_full` is the authoritative record of which intrusive list owns
+     * the node (the used-count is not: a full-by-count slab can still sit on the
+     * active list). A node on `full_` is already past the "second list" stage, so
+     * it carries no second list of its own.
+     */
+    iterator iterator_at(node_type* node, const std::uint32_t index) const noexcept {
+        return iterator{node, node->on_full ? nullptr : full_, node->allocator.make_iterator(index), node->on_full};
+    }
 
     bool grow() {
         if (max_slabs_ && slab_count_ >= max_slabs_) {
