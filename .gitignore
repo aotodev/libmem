@@ -1,6 +1,10 @@
 # Build directories
 build/
+build-*/
 out/
+
+# Personal notes, never shared
+*.local.md
 
 # CMake
 CMakeCache.txt

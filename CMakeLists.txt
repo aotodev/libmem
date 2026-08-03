@@ -41,12 +41,8 @@ endif()
 
 # ---------------------------------------------------------------------------------------
 # Options
-#
-# USE_SANITIZERS / THREAD_SANITIZER are deliberately unprefixed: when libmem is
-# embedded in a parent project, the sanitizer flags MUST match the parent's or the
-# combined binary is ill-formed, so inheriting the parent's cache value is correct.
-# LIBMEM_BUILD_TESTS / LIBMEM_BUILD_FUZZERS are prefixed so a parent's BUILD_TESTS=ON
-# does not silently drag libmem's own suites into the consumer's build.
+# USE_SANITIZERS / THREAD_SANITIZER: unprefixed on purpose, so an embedded build
+# inherits the parent's value. Sanitizer flags have to match it.
 # ---------------------------------------------------------------------------------------
 option(BUILD_SHARED_LIBS     "Build libmem as a shared library"                          OFF)
 option(LIBMEM_PIC            "Enable Position Independent Code for static library"       OFF)
@@ -65,15 +61,8 @@ cmake_dependent_option(THREAD_SANITIZER
     "Use Thread Sanitizer instead of ASan" OFF "USE_SANITIZERS" OFF)
 
 # ---------------------------------------------------------------------------------------
-# Global flags and properties
-#
-# Note: 'import std;' compiles the std module BMI with these flags. Any mismatch
-# (e.g. std with RTTI, consumer without) causes link failures, which is exactly why
-# this whole block is skipped when libmem is embedded via add_subdirectory /
-# FetchContent. Global codegen policy belongs to the top-level project; imposing our
-# own -fno-rtti / LTO / debug flags on a subtree of someone else's build would fork
-# the std BMI and can produce an ODR-incompatible mix. An embedding parent is
-# responsible for setting these consistently (libpixel, for instance, already does).
+# Global flags and properties. Top-level only: these also compile the `import std;`
+# BMI, so an embedded build must take the parent's codegen flags, not ours.
 # ---------------------------------------------------------------------------------------
 if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -138,9 +127,7 @@ else()
     endif()
 endif()
 
-# Language level and module support are set per-target rather than via the global
-# CMAKE_CXX_* variables, so libmem stays self-sufficient when embedded in a parent
-# project that skips the top-level block above.
+# Per-target, so libmem still compiles when the block above is skipped.
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
@@ -179,12 +166,7 @@ target_compile_options(libmem_project_flags INTERFACE
     -Wold-style-cast
     -Wuninitialized
     -Werror
-
-    # -Wundef is deliberately absent. These flags also compile the synthesized
-    # 'import std;' BMI (see the note above), and libstdc++'s bits/std.cc guards
-    # optional features with `#if __cpp_lib_senders` / `#if __glibcxx_reflection`
-    # on macros that are simply not defined yet. With -Werror that makes the
-    # std module fail to scan, so the library cannot build at all on GCC 16.
+    # No -Wundef: it makes libstdc++'s bits/std.cc fail to scan, so nothing builds.
 )
 
 # Compiler-specific warnings
@@ -201,10 +183,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Sanitizers: kept in a separate target from the warnings above because the two have
-# opposite embedding rules: instrumentation is worth keeping when libmem is built inside
-# someone else's tree (it is a memory library; ASan on the allocators is the point),
-# whereas our -Werror set is not (see below).
+# Sanitizers. Separate from the warnings above: this one is linked even when embedded.
 # ---------------------------------------------------------------------------------------
 add_library(libmem_sanitizers INTERFACE)
 
@@ -212,8 +191,7 @@ if(USE_SANITIZERS)
     target_compile_options(libmem_sanitizers INTERFACE
         $<$<AND:$<CONFIG:Debug>,$<NOT:$<BOOL:${THREAD_SANITIZER}>>>:-fsanitize=address,undefined>
         $<$<AND:$<CONFIG:Debug>,$<BOOL:${THREAD_SANITIZER}>>:-fsanitize=thread,undefined>
-        # Make UBSan findings abort (and emit a stack trace) instead of merely
-        # logging and continuing, so tests/CI actually fail on undefined behaviour.
+        # Abort on a UBSan finding instead of logging and continuing.
         $<$<CONFIG:Debug>:-fno-sanitize-recover=undefined>
     )
     target_link_options(libmem_sanitizers INTERFACE
@@ -224,10 +202,7 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE libmem_sanitizers)
 
-# Our warning policy applies to our own builds only. Forcing -Werror on a consumer is a
-# packaging hazard: a newer compiler that emits a brand-new warning inside libmem would
-# break *their* build through no fault of theirs. Embedded, libmem compiles with whatever
-# warning flags the parent project uses.
+# Top-level only: never impose -Werror on a consumer's build.
 if(PROJECT_IS_TOP_LEVEL)
     target_link_libraries(${PROJECT_NAME} PRIVATE libmem_project_flags)
 endif()
@@ -253,9 +228,8 @@ target_sources(${PROJECT_NAME}
 )
 
 # ---------------------------------------------------------------------------------------
-# Symlink compile_commands.json to source root for tooling.
-# Top-level only: when embedded, CMAKE_SOURCE_DIR is the parent's root and this would
-# clobber the consumer's own symlink.
+# Symlink compile_commands.json to the source root for tooling. Top-level only:
+# CMAKE_SOURCE_DIR is the parent's root when embedded.
 # ---------------------------------------------------------------------------------------
 if(PROJECT_IS_TOP_LEVEL)
     if(UNIX)
@@ -275,24 +249,18 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Tests: top-level only. A consumer building its own suites must not have libmem's
-# pulled in (and its `unit_tests` target name would collide).
+# Tests. Top-level only: a consumer must not get our suites, and `unit_tests` would
+# collide with theirs.
 # ---------------------------------------------------------------------------------------
 if(PROJECT_IS_TOP_LEVEL AND LIBMEM_BUILD_TESTS)
-    # enable_testing() must run in the top-level scope so CMake emits a root
-    # CTestTestfile.cmake that descends into tests/; otherwise `ctest` invoked
-    # at the build root discovers nothing (the tests/ include(CTest) only
-    # enables testing for that subdirectory).
+    # Must stay in this scope: it is what makes ctest at the build root descend
+    # into tests/. Moving it into tests/ silently discovers nothing.
     enable_testing()
     add_subdirectory(tests)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Fuzzing (libFuzzer)
-#
-# Coverage-guided fuzz targets. Reuses the Debug ASan + UBSan instrumentation and
-# adds SanitizerCoverage to the library (and harnesses) via -fsanitize=fuzzer-no-link;
-# the fuzz executables link the libFuzzer driver with -fsanitize=fuzzer.
+# Fuzzing (libFuzzer). Clang + Debug + sanitizers only.
 # ---------------------------------------------------------------------------------------
 if(PROJECT_IS_TOP_LEVEL AND LIBMEM_BUILD_FUZZERS)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
