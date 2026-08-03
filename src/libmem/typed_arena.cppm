@@ -32,7 +32,7 @@ import std;
 namespace libmem {
 
 /* ============================================================================
- * typed_arena — bump allocator with destructor tracking
+ * typed_arena: bump allocator with destructor tracking
  * ============================================================================ */
 
 /**
@@ -44,7 +44,7 @@ namespace libmem {
  * destruction the chain is walked, calling each destructor in reverse
  * construction order before recycling the buffer.
  *
- * Trivially-destructible types incur no extra overhead — the destructor
+ * Trivially-destructible types incur no extra overhead; the destructor
  * chain is bypassed entirely.
  */
 export class typed_arena {
@@ -107,7 +107,7 @@ public:
     /**
      * @brief Bump-allocate `bytes` with `alignment`.
      * @return Pointer to the freshly bumped region, or `nullptr` if exhausted.
-     * @note Raw allocations are not tracked — the caller is responsible for
+     * @note Raw allocations are not tracked; the caller is responsible for
      *       any required cleanup.
      */
     [[nodiscard]] void* allocate(const std::size_t bytes, const std::size_t alignment) noexcept {
@@ -126,11 +126,11 @@ public:
     /** @brief `memory_resource`-compatible allocate using the default alignment. */
     [[nodiscard]] void* allocate(const std::size_t bytes) noexcept { return allocate(bytes, default_alignment_); }
 
-    /** @brief No-op deallocation — required by `memory_resource`. */
+    /** @brief No-op deallocation, required by `memory_resource`. */
     void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
 
     /* ========================================================================
-     * Typed allocation interface — supports ALL object types
+     * Typed allocation interface: supports ALL object types
      * ======================================================================== */
 
     /**

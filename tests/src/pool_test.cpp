@@ -1,6 +1,6 @@
 /**
  * @file pool_test.cpp
- * @brief Smoke tests for `libmem::pool` — insertion stability,
+ * @brief Smoke tests for `libmem::pool`: insertion stability,
  *        erasure, iteration, and ranges interop.
  */
 #include <gtest/gtest.h>
@@ -247,7 +247,7 @@ TEST(PoolTest, erase_half_then_iterate) {
 /*
  * emplace() now builds its iterator from the allocation itself. Across enough
  * insertions to span several slab pages, the returned iterator must always
- * point at the freshly constructed element — this is the property that would
+ * point at the freshly constructed element; this is the property that would
  * break if the node/index handed back by the allocator were wrong.
  */
 TEST(PoolTest, emplace_returns_iterator_at_the_new_element) {

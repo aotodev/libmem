@@ -1,6 +1,6 @@
 /**
  * @file multislab_test.cpp
- * @brief Tests for `libmem::multislab` — lazy growth, max-slab caps,
+ * @brief Tests for `libmem::multislab`: lazy growth, max-slab caps,
  *        full<->active list transitions, hysteresis-based shrinking, block
  *        iteration, and (via a counting resource) leak balance.
  */
@@ -89,7 +89,7 @@ TEST(MultislabTest, respects_max_slab_cap) {
         ASSERT_NE(b, nullptr);
     }
 
-    /* capacity reached — further allocation fails without growing */
+    /* capacity reached: further allocation fails without growing */
     EXPECT_EQ(ms.allocate(), nullptr);
     EXPECT_EQ(ms.slab_count(), max_slabs);
 

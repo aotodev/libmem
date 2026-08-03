@@ -40,7 +40,7 @@ repos:
     hooks:
       - id: shellcheck
 
-  # cmake-format is deliberately omitted — its layout algorithms don't preserve
+  # cmake-format is deliberately omitted: its layout algorithms don't preserve
   # the project's hand-formatted multi-line style. cmake-lint catches structural
   # issues without imposing formatting.
   - repo: https://github.com/cheshirekow/cmake-format-precommit

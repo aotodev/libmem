@@ -5,13 +5,13 @@
  * Collects the building blocks that multiple allocators and containers depend
  * on into a single module partition:
  *
- *   - `cache_line_size`     — alignment quantum for slab blocks.
- *   - `default_alignment`   — default alignment for untyped arena allocations.
- *   - `valid_block_size`    — concept constraining slab block sizes.
- *   - `memory_resource`     — concept for injectable allocation back-ends.
- *   - `default_resource`    — `operator new` / `operator delete` resource.
- *   - `shrink_policy`       — concept for hysteresis-based slab release.
- *   - `threshold_policy`    — default shrink policy implementation.
+ *   - `cache_line_size`:     alignment quantum for slab blocks.
+ *   - `default_alignment`:   default alignment for untyped arena allocations.
+ *   - `valid_block_size`:    concept constraining slab block sizes.
+ *   - `memory_resource`:     concept for injectable allocation back-ends.
+ *   - `default_resource`:    `operator new` / `operator delete` resource.
+ *   - `shrink_policy`:       concept for hysteresis-based slab release.
+ *   - `threshold_policy`:    default shrink policy implementation.
  */
 export module libmem:concepts;
 
@@ -28,7 +28,7 @@ namespace libmem {
  *
  * 32-bit ARM (ARMv7 and earlier) uses 32-byte cache lines; everything else we
  * target uses 64. Note this is the alignment *quantum* for `valid_block_size`,
- * so raising it would invalidate existing block sizes — it is deliberately not
+ * so raising it would invalidate existing block sizes; it is deliberately not
  * bumped to 128 on Apple Silicon.
  */
 export inline constexpr std::size_t cache_line_size{
@@ -40,7 +40,7 @@ export inline constexpr std::size_t cache_line_size{
 };
 
 /**
- * @brief Default alignment for raw `allocate(n)` calls — matches the strictest
+ * @brief Default alignment for raw `allocate(n)` calls; matches the strictest
  *        fundamental alignment requirement (mirrors `malloc`).
  */
 export inline constexpr std::size_t default_alignment{alignof(std::max_align_t)};

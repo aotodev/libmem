@@ -13,7 +13,7 @@
  *   - Reuses freed slots before growing (first-free-bit allocation), so
  *     insertion is amortised O(1). Insertion order is **not preserved**.
  *   - Provides a forward range over the live elements suitable for
- *     `std::ranges` pipelines (`operator|`, views, algorithms, …).
+ *     `std::ranges` pipelines (`operator|`, views, algorithms, ...).
  *
  * @code
  *     libmem::pool<some_struct> p{};
@@ -68,13 +68,13 @@ template <typename T> consteval std::uint32_t default_pool_blocks_per_slab() noe
 } // namespace detail
 
 /* ============================================================================
- * pool — auto-expanding, pointer-stable typed container
+ * pool: auto-expanding, pointer-stable typed container
  * ============================================================================ */
 
 /**
  * @brief Pointer-stable unordered typed container backed by a `libmem::multislab`.
  *
- * @tparam T              Element type — must be an object type.
+ * @tparam T              Element type: must be an object type.
  * @tparam BlocksPerSlab  Number of `T` slots per slab page (auto-derived).
  * @tparam Resource       Backing memory resource (see `memory_resource`).
  * @tparam Policy         Empty-slab hysteresis policy (see `shrink_policy`).
@@ -106,7 +106,7 @@ public:
     static constexpr std::uint32_t blocks_per_slab{pool_type::blocks_per_slab};
 
     /* ========================================================================
-     * Iterator — typed wrapper around the underlying multislab iterator
+     * Iterator: typed wrapper around the underlying multislab iterator
      * ======================================================================== */
 
     /**
@@ -129,7 +129,7 @@ public:
         constexpr basic_iterator() noexcept = default;
 
         /**
-         * @brief Heterogeneous conversion (mutable → const).
+         * @brief Heterogeneous conversion (mutable -> const).
          *
          * Templated on a distinct `OtherConst` so this does not displace the
          * implicit copy constructor that the language synthesises for
@@ -243,7 +243,7 @@ public:
     constexpr std::uint32_t empty_slab_count() const noexcept { return pool_.empty_slab_count(); }
 
     /* ========================================================================
-     * Iteration — deducing-this share between const / non-const overloads
+     * Iteration: deducing-this share between const / non-const overloads
      * ======================================================================== */
 
     /** @brief Iterator to the first live element. */
@@ -359,7 +359,7 @@ public:
     }
 
     /* ========================================================================
-     * Observers — direct, deducing-this access to underlying pool knobs
+     * Observers: direct, deducing-this access to underlying pool knobs
      * ======================================================================== */
 
     /** @brief Access the backing memory resource. */

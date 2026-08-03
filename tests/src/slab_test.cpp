@@ -1,6 +1,6 @@
 /**
  * @file slab_test.cpp
- * @brief Tests for `libmem::slab` — allocation, exhaustion, reuse, reset,
+ * @brief Tests for `libmem::slab`: allocation, exhaustion, reuse, reset,
  *        ownership queries, and bitmap iteration.
  */
 #include <gtest/gtest.h>
@@ -133,8 +133,8 @@ TEST(SlabTest, allocate_at_reports_the_block_index) {
 }
 
 /*
- * A freed slot is reused, and allocate_at() reports the reused index — not a
- * fresh one — so iterators built from it stay consistent with the bitmap.
+ * A freed slot is reused, and allocate_at() reports the reused index, not a
+ * fresh one, so iterators built from it stay consistent with the bitmap.
  */
 TEST(SlabTest, allocate_at_reports_reused_index_after_deallocate) {
     constexpr std::uint32_t capacity{4};

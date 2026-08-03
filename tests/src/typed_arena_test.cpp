@@ -1,6 +1,6 @@
 /**
  * @file typed_arena_test.cpp
- * @brief Tests for `libmem::typed_arena` — non-trivially-destructible types,
+ * @brief Tests for `libmem::typed_arena`: non-trivially-destructible types,
  *        destructor ordering, trivial-type passthrough, and reset semantics.
  */
 #include <gtest/gtest.h>
@@ -157,10 +157,10 @@ TEST(TypedArenaTest, move_construction_transfers_dtors) {
         EXPECT_EQ(a.capacity(), 0u);
         EXPECT_EQ(b.capacity(), 4096u);
 
-        /* No destructors called yet — ownership transferred. */
+        /* No destructors called yet: ownership transferred. */
         EXPECT_EQ(tracked::alive, 2);
     }
-    /* b goes out of scope — destructors should fire. */
+    /* b goes out of scope: destructors should fire. */
     EXPECT_EQ(tracked::alive, 0);
     EXPECT_EQ(tracked::destroyed, 2);
 }

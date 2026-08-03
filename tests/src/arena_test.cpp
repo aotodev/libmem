@@ -1,6 +1,6 @@
 /**
  * @file arena_test.cpp
- * @brief Tests for `libmem::arena` — owning/borrowed buffers, alignment,
+ * @brief Tests for `libmem::arena`: owning/borrowed buffers, alignment,
  *        emplace / push_back, exhaustion, reset, and `memory_resource` usage.
  */
 #include <gtest/gtest.h>

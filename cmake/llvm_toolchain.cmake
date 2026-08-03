@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------------------
-# llvm_toolchain.cmake — Universal LLVM 22+ Toolchain File (Multi-Distro)
+# llvm_toolchain.cmake: Universal LLVM 22+ Toolchain File (Multi-Distro)
 #
 # Usage:
 #   cmake -DCMAKE_TOOLCHAIN_FILE=cmake/llvm_toolchain.cmake ..
@@ -34,7 +34,7 @@ set(_LLVM_SEARCH_PATHS
 # For CMAKE_<LANG>_COMPILER variables, CMake toolchain files MUST use set()
 # rather than find_program() directly into those variables. find_program()
 # only creates a CACHE entry, but CMakeDetermineCompiler.cmake checks the
-# normal variable first — if it's unset, CMake ignores the cache and finds
+# normal variable first; if it's unset, CMake ignores the cache and finds
 # the compiler on its own (often picking the wrong one, e.g. AppleClang).
 # ---------------------------------------------------------------------------------------
 macro(_find_llvm_tool VAR VERSIONED_NAME GENERIC_NAME)
@@ -120,7 +120,7 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-stdlib=libc++ -fuse-ld=lld")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT "-stdlib=libc++ -fuse-ld=lld")
 
 # Detect whether the compiler lives under a versioned LLVM prefix.
-# e.g. /usr/lib/llvm-22/bin/clang-22 → prefix = /usr/lib/llvm-22
+# e.g. /usr/lib/llvm-22/bin/clang-22 -> prefix = /usr/lib/llvm-22
 cmake_path(GET CMAKE_C_COMPILER PARENT_PATH _CLANG_BIN_DIR)
 cmake_path(GET _CLANG_BIN_DIR   PARENT_PATH _LLVM_PREFIX_CANDIDATE)
 
@@ -176,4 +176,4 @@ unset(_LIBCXX_LIBRARY)
 set(_LLVM_TOOLCHAIN_RESOLVED TRUE CACHE INTERNAL
     "LLVM toolchain has been configured; skip on re-entry.")
 
-message(STATUS "[LLVM Toolchain] Fully resolved — all tools from LLVM ${_LLVM_MAJOR_VERSION}")
+message(STATUS "[LLVM Toolchain] Fully resolved: all tools from LLVM ${_LLVM_MAJOR_VERSION}")

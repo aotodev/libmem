@@ -34,7 +34,7 @@ namespace libmem {
 inline constexpr std::uint32_t bitmap_word_bits{64};
 
 /* ============================================================================
- * Bitmap utilities — constexpr-friendly, zero-overhead bit manipulation
+ * Bitmap utilities: constexpr-friendly, zero-overhead bit manipulation
  * ============================================================================ */
 
 namespace detail {
@@ -79,7 +79,7 @@ template <std::size_t Words> constexpr void bitmap_clear(std::array<std::uint64_
 } // namespace detail
 
 /* ============================================================================
- * slab — fixed-size block allocator with compile-time capacity
+ * slab: fixed-size block allocator with compile-time capacity
  * ============================================================================ */
 
 /**
@@ -134,7 +134,7 @@ public:
      * @brief Allocate a single block, also reporting the bit-index it was taken from.
      *
      * Callers that need to build an iterator (or otherwise address the block by
-     * index) should prefer this over `allocate()` — the index falls out of the
+     * index) should prefer this over `allocate()`: the index falls out of the
      * bitmap scan for free, whereas recovering it afterwards costs another lookup.
      *
      * @return `{ptr, index}` on success, `{nullptr, 0}` when the slab is full.
@@ -176,7 +176,7 @@ public:
     }
 
     /**
-     * @brief Reset the allocator — all blocks become available.
+     * @brief Reset the allocator; all blocks become available.
      * @note Does not touch the backing memory contents.
      */
     constexpr void reset() noexcept { bitmap_.fill(0); }
@@ -213,7 +213,7 @@ public:
     constexpr std::byte* data() const noexcept { return memory_; }
 
     /* ========================================================================
-     * Iterator — walks allocated blocks via bitmap scanning
+     * Iterator: walks allocated blocks via bitmap scanning
      * ======================================================================== */
 
     class iterator {
@@ -321,7 +321,7 @@ public:
         if (masked) {
             return iterator{this, word_idx, masked};
         }
-        /* Empty word after masking → advance to the next non-empty word. */
+        /* Empty word after masking -> advance to the next non-empty word. */
         for (std::uint32_t i{word_idx + 1}; i < bitmap_words; ++i) {
             if (bitmap_[i]) {
                 return iterator{this, i, bitmap_[i]};

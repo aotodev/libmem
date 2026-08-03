@@ -68,7 +68,7 @@ cmake_dependent_option(THREAD_SANITIZER
 # Global flags and properties
 #
 # Note: 'import std;' compiles the std module BMI with these flags. Any mismatch
-# (e.g. std with RTTI, consumer without) causes link failures — which is exactly why
+# (e.g. std with RTTI, consumer without) causes link failures, which is exactly why
 # this whole block is skipped when libmem is embedded via add_subdirectory /
 # FetchContent. Global codegen policy belongs to the top-level project; imposing our
 # own -fno-rtti / LTO / debug flags on a subtree of someone else's build would fork
@@ -85,11 +85,11 @@ if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_CXX_MODULE_STD ON)
     set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
-    # Default to hidden visibility — shared builds export via LIBMEM_EXPORT
+    # Default to hidden visibility; shared builds export via LIBMEM_EXPORT
     set(CMAKE_CXX_VISIBILITY_PRESET hidden)
     set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
-    # Disable RTTI — not needed and reduces binary size
+    # Disable RTTI: not needed, and reduces binary size
     add_compile_options(-fno-rtti)
 
     # Sized deallocation (both Clang and GCC support this)
@@ -183,7 +183,7 @@ target_compile_options(libmem_project_flags INTERFACE
     # -Wundef is deliberately absent. These flags also compile the synthesized
     # 'import std;' BMI (see the note above), and libstdc++'s bits/std.cc guards
     # optional features with `#if __cpp_lib_senders` / `#if __glibcxx_reflection`
-    # on macros that are simply not defined yet — with -Werror that makes the
+    # on macros that are simply not defined yet. With -Werror that makes the
     # std module fail to scan, so the library cannot build at all on GCC 16.
 )
 
@@ -201,7 +201,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Sanitizers — kept in a separate target from the warnings above because the two have
+# Sanitizers: kept in a separate target from the warnings above because the two have
 # opposite embedding rules: instrumentation is worth keeping when libmem is built inside
 # someone else's tree (it is a memory library; ASan on the allocators is the point),
 # whereas our -Werror set is not (see below).
@@ -275,12 +275,12 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Tests — top-level only. A consumer building its own suites must not have libmem's
+# Tests: top-level only. A consumer building its own suites must not have libmem's
 # pulled in (and its `unit_tests` target name would collide).
 # ---------------------------------------------------------------------------------------
 if(PROJECT_IS_TOP_LEVEL AND LIBMEM_BUILD_TESTS)
     # enable_testing() must run in the top-level scope so CMake emits a root
-    # CTestTestfile.cmake that descends into tests/ — otherwise `ctest` invoked
+    # CTestTestfile.cmake that descends into tests/; otherwise `ctest` invoked
     # at the build root discovers nothing (the tests/ include(CTest) only
     # enables testing for that subdirectory).
     enable_testing()

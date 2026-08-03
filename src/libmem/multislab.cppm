@@ -8,7 +8,7 @@
  * reserve to avoid repeated grow/shrink cycles.
  *
  * The backing memory resource is injected via a concept-constrained template
- * parameter — zero virtual-dispatch overhead. Iteration over all allocated
+ * parameter: zero virtual-dispatch overhead. Iteration over all allocated
  * blocks is exposed as a `std::ranges::input_range`.
  *
  * @code
@@ -33,7 +33,7 @@ import std;
 namespace libmem {
 
 /* ============================================================================
- * Slab node — intrusive doubly-linked list element
+ * Slab node: intrusive doubly-linked list element
  * ============================================================================ */
 
 namespace detail {
@@ -48,7 +48,7 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
     void* raw_memory{};
     /* Which intrusive list the node currently lives on. Tracked explicitly
      * because a slab can be full (`used == BlocksPerSlab`) while still on the
-     * active list — full slabs are migrated lazily, on the next allocation. */
+     * active list; full slabs are migrated lazily, on the next allocation. */
     bool on_full{false};
 
     slab_node(void* mem, const std::size_t mem_size) noexcept : allocator{mem, mem_size}, raw_memory{mem} {}
@@ -57,7 +57,7 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
 } // namespace detail
 
 /* ============================================================================
- * multislab — auto-expanding allocator
+ * multislab: auto-expanding allocator
  * ============================================================================ */
 
 /**
@@ -165,7 +165,7 @@ public:
             move_to_active(node);
         }
 
-        /* Became empty — apply shrink policy. */
+        /* Became empty: apply shrink policy. */
         if (node->used == 0) [[unlikely]] {
             empty_count_++;
             if (policy_.should_shrink(empty_count_, slab_count_)) {
@@ -200,7 +200,7 @@ public:
     constexpr const Policy& policy() const noexcept { return policy_; }
 
     /* ========================================================================
-     * Range interface — iterate over all allocated blocks
+     * Range interface: iterate over all allocated blocks
      * ======================================================================== */
 
     class iterator {
@@ -271,7 +271,7 @@ public:
 
         constexpr void advance_to_valid_node() noexcept {
             /* If the primary (active) list is empty, start on the second (full)
-             * list — otherwise iteration over an all-full multislab would yield
+             * list; otherwise iteration over an all-full multislab would yield
              * nothing even though every block is live. */
             if (!current_node_ && !on_second_list_) {
                 current_node_ = second_list_;
@@ -351,7 +351,7 @@ public:
      * instead of O(S): allocation already knows which slab node it took the
      * block from and which bit-index it used, so neither the `find_owner`
      * scan nor the bitmap lookup is needed. Prefer this whenever the caller
-     * wants the position — `pool::emplace` is the motivating case.
+     * wants the position; `pool::emplace` is the motivating case.
      */
     [[nodiscard]] allocation allocate_at() {
         const auto raw{allocate_raw()};
@@ -408,7 +408,7 @@ private:
         auto alloc{node->allocator.allocate_at()};
 
         if (!alloc.ptr) [[unlikely]] {
-            /* This node is full — move it to the full list. */
+            /* This node is full; move it to the full list. */
             move_to_full(node);
 
             /* Grow a new slab and retry. */

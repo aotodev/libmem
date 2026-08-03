@@ -7,7 +7,7 @@
  * region is reclaimed at once via `reset()` or at destruction. The allocator is
  * therefore well suited to short-lived scratch work where many small objects
  * share a common lifetime (per-frame data, parser scratch, intermediate
- * computations, …).
+ * computations, ...).
  *
  * The buffer can either be owned (heap-allocated internally) or borrowed
  * (provided by the caller as an `std::span<std::byte>`). Element placement
@@ -39,13 +39,13 @@ import std;
 namespace libmem {
 
 /* ============================================================================
- * arena — monotonically advancing bump allocator
+ * arena: monotonically advancing bump allocator
  * ============================================================================ */
 
 /**
  * @brief Linear scratch allocator over a single contiguous byte buffer.
  *
- * Allocation never invokes a destructor — `T` must therefore be trivially
+ * Allocation never invokes a destructor; `T` must therefore be trivially
  * destructible for any typed entry point (`emplace`, `push_back`,
  * `allocate_n`). The allocator can either own its buffer (heap-allocated via
  * `operator new[]`) or wrap a user-supplied buffer.
@@ -126,7 +126,7 @@ public:
     [[nodiscard]] void* allocate(const std::size_t bytes) noexcept { return allocate(bytes, default_alignment_); }
 
     /**
-     * @brief No-op deallocation — required by `memory_resource`; the cursor
+     * @brief No-op deallocation, required by `memory_resource`; the cursor
      *        only moves backwards via `reset()`.
      */
     void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
@@ -182,7 +182,7 @@ public:
      * ======================================================================== */
 
     /**
-     * @brief Reset the cursor — all previously handed-out pointers become
+     * @brief Reset the cursor; all previously handed-out pointers become
      *        invalid but the backing buffer is preserved for reuse.
      */
     constexpr void reset() noexcept { cursor_ = begin_; }

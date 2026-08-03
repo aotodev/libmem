@@ -22,7 +22,7 @@
 #   readability-function-cognitive-complexity   not actionable as a single metric
 #   misc-include-cleaner                        too aggressive with C++20 modules
 #   misc-no-recursion                           recursion is fine where used
-#   cert-err33-c                                excessive — flags every unchecked stdlib call
+#   cert-err33-c                                excessive: flags every unchecked stdlib call
 
 Checks: "-*,
 bugprone-*,

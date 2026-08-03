@@ -4,8 +4,8 @@
  *
  * Interprets the libFuzzer input as a config header (which compile-time
  * `BlocksPerSlab` instantiation to drive, plus a runtime max-slab cap) followed
- * by an alloc/release opcode stream. Only valid operations are issued — releases
- * always target a currently-live block — so the allocator's defensive asserts
+ * by an alloc/release opcode stream. Only valid operations are issued (releases
+ * always target a currently-live block), so the allocator's defensive asserts
  * are never tripped; ASan, UBSan, and the structural invariants below surface
  * the bugs.
  *

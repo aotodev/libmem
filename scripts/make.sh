@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------------------
-# make.sh — configure + build + (optionally) test libmem
+# make.sh: configure + build + (optionally) test libmem
 #
 # Usage:
 #   ./scripts/make.sh                    # Default: Debug, Clang via LLVM toolchain
