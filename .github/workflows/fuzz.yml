@@ -1,0 +1,35 @@
+# Time-boxed libFuzzer smoke run for the multislab harness (Clang only).
+name: fuzz
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'fuzz/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/fuzz.yml'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  fuzz-smoke:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/libmem-ci:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fuzzers
+        run: |
+          CXX=clang++ cmake -G Ninja -B build-fuzz -DCMAKE_BUILD_TYPE=Debug -DLIBMEM_BUILD_FUZZERS=ON
+          cmake --build build-fuzz -j
+      - name: Smoke-run multislab fuzzer
+        run: ./build-fuzz/fuzz/fuzz_multislab -max_total_time=60 -print_final_stats=1
