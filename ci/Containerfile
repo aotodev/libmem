@@ -1,17 +1,16 @@
-# Toolchain image for libmem CI.
-#
-# Arch is used deliberately: libmem needs a very recent toolchain (C++26 modules
-# + `import std`), and a rolling base tracks the newest clang/gcc.
-#
+# Toolchain image for libmem CI. Arch tracks a new enough clang/gcc for C++26
+# modules and `import std`.
 FROM archlinux:latest
+
+# Links the published package to the repo, so it inherits the repo's permissions.
+LABEL org.opencontainers.image.source=https://github.com/aotodev/libmem
 
 RUN pacman -Syu --noconfirm \
         clang llvm lld \
         gcc \
         libc++ libc++abi \
         cmake ninja \
-        git nodejs \
+        git \
     && pacman -Scc --noconfirm
 
-# nodejs: required by JS-based actions (actions/checkout, actions/cache).
 # libc++/libc++abi: hedge so clang's `import std` works regardless of stdlib.
