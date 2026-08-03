@@ -64,7 +64,7 @@ CMAKE_ARGS=(
 )
 
 if ${BUILD_TESTS}; then
-    CMAKE_ARGS+=("-DBUILD_TESTS=ON")
+    CMAKE_ARGS+=("-DLIBMEM_BUILD_TESTS=ON")
 fi
 
 if ${BUILD_SHARED}; then

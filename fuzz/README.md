@@ -10,14 +10,14 @@ Requires **Clang** and a **Debug** build (so the sanitizers are active).
 
 Each harness reads libFuzzer's random bytes as an opcode stream, issues only
 valid operations (so the library's defensive asserts are never tripped), and
-aborts via `FUZZ_CHECK` when a structural invariant is violated — ASan/UBSan
+aborts via `FUZZ_CHECK` when a structural invariant is violated, ASan/UBSan
 catch memory/UB bugs, the invariants catch logic bugs (e.g. the iteration-count
 check catches lost/leaked slabs).
 
 ## Build & run
 
 ```sh
-CXX=clang++ cmake -G Ninja -B build-fuzz -DCMAKE_BUILD_TYPE=Debug -DBUILD_FUZZERS=ON
+CXX=clang++ cmake -G Ninja -B build-fuzz -DCMAKE_BUILD_TYPE=Debug -DLIBMEM_BUILD_FUZZERS=ON
 cmake --build build-fuzz -j
 
 mkdir -p corpus/multislab
