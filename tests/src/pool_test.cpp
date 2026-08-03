@@ -243,3 +243,46 @@ TEST(PoolTest, erase_half_then_iterate) {
     }
     EXPECT_EQ(seen, static_cast<std::size_t>(n) - erased);
 }
+
+/*
+ * emplace() now builds its iterator from the allocation itself. Across enough
+ * insertions to span several slab pages, the returned iterator must always
+ * point at the freshly constructed element — this is the property that would
+ * break if the node/index handed back by the allocator were wrong.
+ */
+TEST(PoolTest, emplace_returns_iterator_at_the_new_element) {
+    using pool_t = pool<std::int32_t>;
+    constexpr std::int32_t n{static_cast<std::int32_t>(pool_t::blocks_per_slab) * 2 + 5};
+
+    pool_t p{};
+    for (std::int32_t i{0}; i < n; ++i) {
+        const auto it = p.emplace(i);
+        ASSERT_NE(it, p.end());
+        EXPECT_EQ(*it, i);
+    }
+
+    EXPECT_EQ(p.size(), static_cast<std::size_t>(n));
+    EXPECT_GE(p.slab_count(), 2u);
+}
+
+/*
+ * The iterator emplace() returns must be a normal, usable position: walking on
+ * from it stays inside the pool and terminates at end().
+ */
+TEST(PoolTest, iterator_from_emplace_is_traversable) {
+    pool<std::int32_t> p{};
+    for (std::int32_t i{0}; i < 3; ++i) {
+        static_cast<void>(p.emplace(i));
+    }
+
+    const auto it = p.emplace(99);
+    EXPECT_EQ(*it, 99);
+
+    std::size_t reachable{0};
+    for (auto walk{it}; walk != p.end(); ++walk) {
+        ++reachable;
+    }
+    /* At least the element itself, and never more than the whole pool. */
+    EXPECT_GE(reachable, 1u);
+    EXPECT_LE(reachable, p.size());
+}

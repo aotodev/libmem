@@ -17,7 +17,7 @@ FetchContent_MakeAvailable(
 file(GLOB_RECURSE TEST_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp)
 add_executable(unit_tests ${TEST_SOURCE})
 
-target_link_libraries(unit_tests PRIVATE libmem project_flags gtest gtest_main)
+target_link_libraries(unit_tests PRIVATE libmem libmem_project_flags libmem_sanitizers gtest gtest_main)
 
 include(GoogleTest)
 gtest_discover_tests(unit_tests)

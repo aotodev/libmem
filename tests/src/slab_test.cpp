@@ -108,3 +108,47 @@ TEST(SlabTest, iterator_visits_every_allocated_block) {
 }
 
 } // namespace
+
+/*
+ * allocate_at() must agree with allocate() on which block it hands out, and
+ * additionally report the bit-index that block occupies. The index is what lets
+ * callers build an iterator without a second bitmap scan, so it has to line up
+ * with make_iterator().
+ */
+TEST(SlabTest, allocate_at_reports_the_block_index) {
+    constexpr std::uint32_t capacity{4};
+    alignas(block) std::array<std::byte, block * capacity> storage{};
+    slab<block, capacity> s{storage.data(), storage.size()};
+
+    for (std::uint32_t expected{0}; expected < capacity; ++expected) {
+        const auto alloc{s.allocate_at()};
+        ASSERT_NE(alloc.ptr, nullptr);
+        EXPECT_EQ(alloc.index, expected);
+        /* The reported index must address the very block we were handed. */
+        EXPECT_EQ(*s.make_iterator(alloc.index), alloc.ptr);
+    }
+
+    /* Exhausted: null pointer, and the index carries no meaning. */
+    EXPECT_EQ(s.allocate_at().ptr, nullptr);
+}
+
+/*
+ * A freed slot is reused, and allocate_at() reports the reused index — not a
+ * fresh one — so iterators built from it stay consistent with the bitmap.
+ */
+TEST(SlabTest, allocate_at_reports_reused_index_after_deallocate) {
+    constexpr std::uint32_t capacity{4};
+    alignas(block) std::array<std::byte, block * capacity> storage{};
+    slab<block, capacity> s{storage.data(), storage.size()};
+
+    const auto first{s.allocate_at()};
+    const auto second{s.allocate_at()};
+    ASSERT_NE(first.ptr, nullptr);
+    ASSERT_NE(second.ptr, nullptr);
+
+    s.deallocate(first.ptr);
+
+    const auto reused{s.allocate_at()};
+    EXPECT_EQ(reused.ptr, first.ptr);
+    EXPECT_EQ(reused.index, first.index);
+}

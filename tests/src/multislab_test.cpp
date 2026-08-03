@@ -226,3 +226,91 @@ TEST(MultislabTest, backing_resource_is_balanced_after_destroy) {
 }
 
 } // namespace
+
+/*
+ * allocate_at() is the O(1) counterpart of allocate() + make_iterator(). It must
+ * be observably identical: the iterator has to dereference to the block just
+ * handed out, and walking on from it must visit exactly the same remaining
+ * blocks as an iterator built the slow way.
+ */
+TEST(MultislabTest, allocate_at_matches_allocate_plus_make_iterator) {
+    multislab<block, 4> ms{};
+
+    std::vector<void*> live{};
+    for (int i{0}; i < 10; ++i) {
+        const auto alloc{ms.allocate_at()};
+        ASSERT_NE(alloc.ptr, nullptr);
+
+        /* Positioned at the block we were just given. */
+        EXPECT_EQ(*alloc.it, alloc.ptr);
+
+        /* And the onward traversal agrees with make_iterator(ptr). */
+        std::vector<void*> from_allocate_at{};
+        for (auto it{alloc.it}; it != ms.end(); ++it) {
+            from_allocate_at.push_back(*it);
+        }
+        std::vector<void*> from_make_iterator{};
+        for (auto it{ms.make_iterator(alloc.ptr)}; it != ms.end(); ++it) {
+            from_make_iterator.push_back(*it);
+        }
+        EXPECT_EQ(from_allocate_at, from_make_iterator);
+
+        live.push_back(alloc.ptr);
+    }
+
+    for (auto* p : live) {
+        ms.deallocate(p);
+    }
+}
+
+/*
+ * allocate_at() must report failure the same way allocate() does, with an
+ * end-equivalent iterator rather than one pointing into nothing.
+ */
+TEST(MultislabTest, allocate_at_yields_end_iterator_when_exhausted) {
+    constexpr std::uint32_t per_slab{4};
+    multislab<block, per_slab> ms{1u}; // max 1 slab
+
+    std::array<void*, per_slab> blocks{};
+    for (auto& b : blocks) {
+        b = ms.allocate();
+        ASSERT_NE(b, nullptr);
+    }
+
+    const auto alloc{ms.allocate_at()};
+    EXPECT_EQ(alloc.ptr, nullptr);
+    EXPECT_EQ(alloc.it, ms.end());
+
+    for (auto* b : blocks) {
+        ms.deallocate(b);
+    }
+}
+
+/*
+ * make_iterator() decides whether a node sits on the full list from the node's
+ * own on_full flag rather than by scanning full_. Pin every block of a capped,
+ * completely full multislab so the owning node really is on the full list, and
+ * check the iterator still walks the remaining blocks correctly.
+ */
+TEST(MultislabTest, make_iterator_handles_nodes_on_the_full_list) {
+    constexpr std::uint32_t per_slab{4};
+    multislab<block, per_slab> ms{1u}; // max 1 slab, so it ends up full
+
+    std::array<void*, per_slab> blocks{};
+    for (auto& b : blocks) {
+        b = ms.allocate();
+        ASSERT_NE(b, nullptr);
+    }
+    ASSERT_EQ(ms.allocate(), nullptr); // provokes the move to the full list
+
+    /* From the first block, iteration must still reach all four. */
+    const auto visited{std::ranges::distance(ms.make_iterator(blocks[0]), ms.end())};
+    EXPECT_EQ(visited, static_cast<std::ptrdiff_t>(per_slab));
+
+    /* From the last block, exactly one. */
+    EXPECT_EQ(std::ranges::distance(ms.make_iterator(blocks[per_slab - 1]), ms.end()), 1);
+
+    for (auto* b : blocks) {
+        ms.deallocate(b);
+    }
+}
