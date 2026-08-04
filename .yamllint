@@ -1,4 +1,4 @@
-# Relaxes the yamllint rules that clash with the Forgejo/GitHub Actions workflow
+# Relaxes the yamllint rules that clash with the GitHub Actions workflow
 # dialect, while keeping the rest of the default ruleset for ordinary YAML:
 #   - document-start: workflows conventionally omit the leading "---".
 #   - truthy/check-keys: the mandatory `on:` workflow key is not a boolean.

@@ -6,7 +6,7 @@
  *
  *   - **Concepts & policies**: `memory_resource`, `shrink_policy`, `default_resource`, `threshold_policy`.
  *   - **Allocators**: `slab`, `multislab`, `arena`, `typed_arena`.
- *   - **Containers**: `pool`, `sparse_set` (placeholder).
+ *   - **Containers**: `pool`, `spsc_ring`, `sparse_set` (placeholder).
  */
 export module libmem;
 
@@ -16,4 +16,5 @@ export import :multislab;
 export import :arena;
 export import :typed_arena;
 export import :pool;
+export import :spsc_ring;
 export import :sparse_set;

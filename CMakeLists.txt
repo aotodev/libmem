@@ -217,6 +217,7 @@ set(ModuleInterfaceFiles
     src/libmem/arena.cppm
     src/libmem/typed_arena.cppm
     src/libmem/pool.cppm
+    src/libmem/spsc_ring.cppm
     src/libmem/sparse_set.cppm
     src/libmem/libmem.cppm
 )
