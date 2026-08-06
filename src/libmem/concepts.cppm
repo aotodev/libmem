@@ -9,10 +9,17 @@
  *   - `default_alignment`:   default alignment for untyped arena allocations.
  *   - `valid_block_size`:    concept constraining slab block sizes.
  *   - `memory_resource`:     concept for injectable allocation back-ends.
+ *   - `aligned_memory_resource`: refinement that honours an explicit alignment.
  *   - `default_resource`:    `operator new` / `operator delete` resource.
+ *   - `resource_ref`:        non-owning reference to a shared resource.
+ *   - `allocator_resource`:  adapts a standard Allocator to `memory_resource`.
  *   - `shrink_policy`:       concept for hysteresis-based slab release.
  *   - `threshold_policy`:    default shrink policy implementation.
  */
+module;
+
+#include <cassert>
+
 export module libmem:concepts;
 
 import std;
@@ -68,14 +75,142 @@ concept memory_resource = requires(T& r, std::size_t size, void* ptr) {
 };
 
 /**
+ * @brief A `memory_resource` that also honours an explicitly requested alignment.
+ *
+ * The plain `memory_resource` interface carries no alignment, so a resource that
+ * only models it can promise no more than `default_alignment`. Over-aligned
+ * storage (cache-line aligned ring slots, SIMD payloads, an over-aligned `T`)
+ * therefore needs this refinement.
+ *
+ * @note The aligned and unaligned halves are **not** interchangeable: memory
+ *       obtained from `allocate(size, align)` must be released through
+ *       `deallocate(ptr, size, align)` with the same alignment.
+ */
+export template <typename T>
+concept aligned_memory_resource = memory_resource<T> && requires(T& r, std::size_t size, std::size_t align, void* ptr) {
+    { r.allocate(size, align) } -> std::same_as<void*>;
+    { r.deallocate(ptr, size, align) } -> std::same_as<void>;
+};
+
+/**
  * @brief Default memory resource using global `operator new` / `operator delete`.
  */
 export struct default_resource {
     void* allocate(const std::size_t size) { return ::operator new(size); }
     void deallocate(void* ptr, const std::size_t size) noexcept { ::operator delete(ptr, size); }
+
+    void* allocate(const std::size_t size, const std::size_t align) { return ::operator new(size, std::align_val_t{align}); }
+    void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept { ::operator delete(ptr, size, std::align_val_t{align}); }
 };
 
-static_assert(memory_resource<default_resource>);
+static_assert(aligned_memory_resource<default_resource>);
+
+/* ============================================================================
+ * Resource adapters
+ * ============================================================================ */
+
+/**
+ * @brief Non-owning reference to a resource owned elsewhere.
+ *
+ * Every allocator and container in libmem stores its `Resource` **by value**, so
+ * handing several of them the same `arena` needs an indirection. `resource_ref`
+ * is that indirection: copyable, trivially small, and it forwards the aligned
+ * overloads whenever the referent has them, so wrapping a resource never
+ * silently downgrades it to `default_alignment`.
+ *
+ * @code
+ *     libmem::arena scratch{1 << 20};
+ *     libmem::pool<node, 64, libmem::resource_ref<libmem::arena>> a{libmem::resource_ref{scratch}};
+ *     libmem::pool<edge, 64, libmem::resource_ref<libmem::arena>> b{libmem::resource_ref{scratch}};
+ * @endcode
+ *
+ * @warning The referenced resource must outlive every `resource_ref` to it.
+ */
+export template <memory_resource R> class resource_ref {
+public:
+    using resource_type = R;
+
+    /** @brief Construct an empty reference; allocating through it is a precondition violation. */
+    constexpr resource_ref() noexcept = default;
+
+    constexpr explicit resource_ref(R& resource) noexcept : resource_{std::addressof(resource)} {}
+
+    void* allocate(const std::size_t size) {
+        assert(resource_ != nullptr && "resource_ref: no referent");
+        return resource_->allocate(size);
+    }
+
+    void deallocate(void* ptr, const std::size_t size) noexcept {
+        assert(resource_ != nullptr && "resource_ref: no referent");
+        resource_->deallocate(ptr, size);
+    }
+
+    void* allocate(const std::size_t size, const std::size_t align)
+        requires aligned_memory_resource<R>
+    {
+        assert(resource_ != nullptr && "resource_ref: no referent");
+        return resource_->allocate(size, align);
+    }
+
+    void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept
+        requires aligned_memory_resource<R>
+    {
+        assert(resource_ != nullptr && "resource_ref: no referent");
+        resource_->deallocate(ptr, size, align);
+    }
+
+    /** @brief The referenced resource, or `nullptr` when default-constructed. */
+    constexpr R* get() const noexcept { return resource_; }
+
+    constexpr bool operator==(const resource_ref&) const noexcept = default;
+
+private:
+    R* resource_{};
+};
+
+static_assert(memory_resource<resource_ref<default_resource>>);
+static_assert(aligned_memory_resource<resource_ref<default_resource>>);
+
+/**
+ * @brief Adapts a standard Allocator to the `memory_resource` interface.
+ *
+ * Lets any `std::allocator`-conforming type (including
+ * `std::pmr::polymorphic_allocator`) back a libmem allocator or container. The
+ * allocator is rebound to `std::byte`, so only the byte count crosses the
+ * boundary.
+ *
+ * @note Deliberately not an `aligned_memory_resource`: the Allocator interface
+ *       cannot express a runtime alignment, so over-aligned storage will
+ *       correctly refuse to instantiate against this adapter rather than
+ *       quietly under-align.
+ */
+export template <typename Alloc> class allocator_resource {
+    using byte_allocator = typename std::allocator_traits<Alloc>::template rebind_alloc<std::byte>;
+    using traits = std::allocator_traits<byte_allocator>;
+
+public:
+    using allocator_type = Alloc;
+
+    constexpr allocator_resource()
+        requires std::default_initializable<byte_allocator>
+    = default;
+
+    constexpr explicit allocator_resource(const Alloc& allocator) : allocator_{allocator} {}
+
+    void* allocate(const std::size_t size) { return traits::allocate(allocator_, size); }
+
+    void deallocate(void* ptr, const std::size_t size) noexcept { traits::deallocate(allocator_, static_cast<std::byte*>(ptr), size); }
+
+    /** @brief Access the rebound allocator. */
+    constexpr byte_allocator& allocator() noexcept { return allocator_; }
+    constexpr const byte_allocator& allocator() const noexcept { return allocator_; }
+
+private:
+    byte_allocator allocator_{};
+};
+
+static_assert(memory_resource<allocator_resource<std::allocator<int>>>);
+static_assert(!aligned_memory_resource<allocator_resource<std::allocator<int>>>);
 
 /* ============================================================================
  * Hysteresis shrink-policy concept & default implementation

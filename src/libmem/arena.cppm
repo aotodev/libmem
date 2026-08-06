@@ -131,6 +131,9 @@ public:
      */
     void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
 
+    /** @brief No-op aligned deallocation, completing `aligned_memory_resource`. */
+    void deallocate(void* /*ptr*/, const std::size_t /*bytes*/, const std::size_t /*alignment*/) noexcept {}
+
     /* ========================================================================
      * Typed allocation interface
      * ======================================================================== */
@@ -226,6 +229,8 @@ private:
         owns_buffer_ = false;
     }
 };
+
+static_assert(aligned_memory_resource<arena>);
 
 } // namespace libmem
 
