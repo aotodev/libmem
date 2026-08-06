@@ -106,6 +106,26 @@ The trade against `pool` is stability: `pool` never relocates a live element,
 while these relocate on growth exactly as `std::vector` does. Iterating is the
 mirror image, contiguous here versus a bitmap scan there.
 
+### Ranges
+
+`sparse_set` is a contiguous range of ids; `sparse_map` is a random-access range of
+`(id, payload)` tuples over its two parallel arrays, so the standard adaptors apply
+to it directly. Both have `std::from_range_t` constructors, so `std::ranges::to`
+builds them.
+
+```cpp
+for (int& hp : health | std::views::values) { hp -= 1; }         // writes through
+auto ids   = health | std::views::keys | std::ranges::to<std::vector>();
+auto alive = ids | std::views::filter(is_alive) | std::ranges::to<libmem::sparse_set<entity>>();
+auto m     = std::views::zip(ids, values) | std::ranges::to<libmem::sparse_map<entity, int>>();
+```
+
+`keys()` and `values()` stay available as contiguous spans when that is what an
+algorithm wants. One standard wrinkle worth knowing: `std::ranges::to` will not
+move elements out of an rvalue container, because a container's reference type
+stays an lvalue reference regardless of how it is passed; reach for
+`std::views::as_rvalue` when the payload is move-only.
+
 ## Building
 
 ```sh
@@ -179,9 +199,11 @@ swap-and-pop, move-only and non-trivially-destructible payloads, and each of the
 three storage kinds per container. The two-thread handoff runs for both ring
 variants, also under **ThreadSanitizer** (`-DTHREAD_SANITIZER=ON`).
 
-A coverage-guided **libFuzzer** harness drives the `multislab` allocator under
-ASan + UBSan (`-DLIBMEM_BUILD_FUZZERS=ON`, Clang only); CI runs a short, time-boxed
-smoke pass. See [fuzz/README.md](fuzz/README.md).
+Coverage-guided **libFuzzer** harnesses drive `multislab`, `sparse_set`, and
+`sparse_map` under ASan + UBSan (`-DLIBMEM_BUILD_FUZZERS=ON`, Clang only); CI runs a
+short, time-boxed smoke pass on each. The two sparse harnesses are differential,
+comparing every operation against a standard container. See
+[fuzz/README.md](fuzz/README.md).
 
 This is an early-stage library (and a C++26 modules testbed), so treat the above
 as what is exercised today, not a guarantee of exhaustive coverage.
