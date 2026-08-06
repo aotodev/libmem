@@ -19,8 +19,30 @@
  *     libmem::sparse_map<entity, transform> transforms{};
  *     transforms.emplace(entity{7}, position, rotation);
  *     if (auto* t = transforms.find(entity{7})) { ... }
- *     for (auto&& [e, t] : std::views::zip(transforms.keys(), transforms.values())) { ... }
+ *     for (auto&& [e, t] : transforms) { ... }           // a range of (id, payload)
  * @endcode
+ *
+ * @section sparse_set_ranges Ranges
+ *
+ * `sparse_set` is a contiguous range of ids. `sparse_map` is a random-access range
+ * of two-element tuples over its two parallel arrays, so the standard adaptors
+ * apply to it directly:
+ *
+ * @code
+ *     for (int& hp : health | std::views::values) { hp -= 1; }
+ *     auto ids = health | std::views::keys | std::ranges::to<std::vector>();
+ * @endcode
+ *
+ * Both have `std::from_range_t` constructors, so `std::ranges::to` can build them:
+ *
+ * @code
+ *     auto alive = ids | std::views::filter(is_alive) | std::ranges::to<libmem::sparse_set<entity>>();
+ *     auto m     = std::views::zip(ids, values) | std::ranges::to<libmem::sparse_map<entity, int>>();
+ * @endcode
+ *
+ * `keys()` and `values()` remain available when a plain contiguous span of one side
+ * is what an algorithm wants; `each()` names the zipped view that `begin()` and
+ * `end()` are built on.
  *
  * @section sparse_set_storage Storage and growth
  *
@@ -155,6 +177,20 @@ public:
                     std::constructible_from<DenseStorage, Args&...>
     explicit sparse_set(Args&&... args) : sparse_{args...}, dense_{args...} {
         fill_sparse(0);
+    }
+
+    /**
+     * @brief Construct from a range of ids, so `std::ranges::to` can build one.
+     *
+     * @code
+     *     auto alive = ids | std::views::filter(is_alive) | std::ranges::to<libmem::sparse_set<entity>>();
+     * @endcode
+     */
+    template <std::ranges::input_range R>
+        requires std::convertible_to<std::ranges::range_reference_t<R>, const Id&> && std::default_initializable<index_storage> &&
+                 std::default_initializable<DenseStorage>
+    sparse_set(std::from_range_t, R&& range) : sparse_set() {
+        insert_range(std::forward<R>(range));
     }
 
     sparse_set(const sparse_set&) = delete;
@@ -427,6 +463,25 @@ private:
  * sparse_map: a payload per id
  * ============================================================================ */
 
+namespace detail {
+
+/**
+ * @brief A range of two-element tuple-likes usable as `(id, payload)` entries.
+ *
+ * Spelled through `std::get` rather than a structured binding so the value
+ * category of the element carries through: an rvalue range moves its payloads in,
+ * an lvalue range copies them. Accepts `std::pair`, `std::tuple`, and whatever
+ * `std::views::zip` yields.
+ */
+template <typename R, typename Id, typename T>
+concept pair_range_for = std::ranges::input_range<R> && requires(std::ranges::range_reference_t<R> entry) {
+    requires std::tuple_size_v<std::remove_cvref_t<std::ranges::range_reference_t<R>>> == 2;
+    { std::get<0>(entry) } -> std::convertible_to<const Id&>;
+    requires std::constructible_from<T, decltype(std::get<1>(std::forward<std::ranges::range_reference_t<R>>(entry)))>;
+};
+
+} // namespace detail
+
 /**
  * @brief Id-keyed map holding one `T` per member id, dense-packed alongside the keys.
  *
@@ -487,6 +542,19 @@ public:
         requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, sparse_map> && ...) && std::constructible_from<key_set, Args&...> &&
                     std::constructible_from<value_storage, Args&...>
     explicit sparse_map(Args&&... args) : keys_{args...}, values_{args...} {}
+
+    /**
+     * @brief Construct from a range of `(id, payload)` pairs, so `std::ranges::to` can build one.
+     *
+     * @code
+     *     auto m = std::views::zip(ids, values) | std::ranges::to<libmem::sparse_map<entity, transform>>();
+     * @endcode
+     */
+    template <std::ranges::input_range R>
+        requires detail::pair_range_for<R, Id, T> && std::default_initializable<key_set> && std::default_initializable<value_storage>
+    sparse_map(std::from_range_t, R&& range) : sparse_map() {
+        insert_range(std::forward<R>(range));
+    }
 
     sparse_map(const sparse_map&) = delete;
     sparse_map& operator=(const sparse_map&) = delete;
@@ -569,8 +637,23 @@ public:
     /** @brief The member ids, in dense order. */
     std::span<const Id> keys() const noexcept { return keys_.keys(); }
 
-    /** @brief The payloads, in the same order as `keys()`; zip the two to walk pairs. */
+    /** @brief The payloads, in the same order as `keys()`. */
     constexpr auto values(this auto&& self) noexcept { return std::span{self.values_.data(), self.keys_.size()}; }
+
+    /**
+     * @brief The entries as a range of `(id, payload)` pairs.
+     *
+     * A `std::views::zip` over the two spans, which is what makes the map itself a
+     * random-access range: `begin()` / `end()` below just forward to it, so
+     * `std::views::keys`, `std::views::values`, `std::views::elements`, and a
+     * structured-binding `for` all work directly on the map. Both spans are
+     * borrowed ranges, so the returned iterators outlive this temporary view.
+     */
+    constexpr auto each(this auto&& self) noexcept { return std::views::zip(self.keys(), self.values()); }
+
+    /** @brief Iterator over `(id, payload)` pairs, in dense order. */
+    constexpr auto begin(this auto&& self) noexcept { return self.each().begin(); }
+    constexpr auto end(this auto&& self) noexcept { return self.each().end(); }
 
     /** @brief The key set itself, for membership queries and dense-index lookups. */
     constexpr const key_set& key_set_view() const noexcept { return keys_; }
@@ -621,6 +704,26 @@ public:
 
         assert(keys_.size() == at + 1 && "sparse_map: key insert did not land where the payload did");
         return {slot, true};
+    }
+
+    /**
+     * @brief Emplace every `(id, payload)` entry of `range`.
+     *
+     * Entries whose id is already present keep their existing payload, matching
+     * `emplace` rather than `insert_or_assign`.
+     *
+     * @return How many entries were newly inserted.
+     */
+    template <std::ranges::input_range R>
+        requires detail::pair_range_for<R, Id, T>
+    size_type insert_range(R&& range) {
+        size_type added{};
+        for (auto&& entry : range) {
+            if (emplace(std::get<0>(entry), std::get<1>(std::forward<decltype(entry)>(entry))).second) {
+                ++added;
+            }
+        }
+        return added;
     }
 
     /** @brief Insert `value` for `id`, or overwrite the payload if `id` already has one. */
@@ -693,6 +796,24 @@ static_assert(inline_set::static_capacity == 64);
 
 static_assert(std::ranges::contiguous_range<sparse_map<sparse_test_id, int>::key_set>);
 static_assert(std::movable<sparse_map<sparse_test_id, std::size_t>>);
+
+/* sparse_map zips two parallel arrays, so it is random-access but never
+ * contiguous: the (id, payload) pairs do not exist in memory as pairs. Being a
+ * range of two-element tuples is what lets std::views::keys / values / elements
+ * apply to the map directly. */
+using dynamic_map = sparse_map<sparse_test_id, int>;
+
+static_assert(std::ranges::random_access_range<dynamic_map>);
+static_assert(std::ranges::random_access_range<const dynamic_map>);
+static_assert(std::ranges::common_range<dynamic_map>);
+static_assert(!std::ranges::contiguous_range<dynamic_map>);
+static_assert(std::tuple_size_v<std::ranges::range_value_t<dynamic_map>> == 2);
+static_assert(std::same_as<std::tuple_element_t<1, std::ranges::range_reference_t<dynamic_map>>, int&>);
+static_assert(std::same_as<std::tuple_element_t<1, std::ranges::range_reference_t<const dynamic_map>>, const int&>);
+
+/* Both are buildable by std::ranges::to via their from_range_t constructors. */
+static_assert(std::constructible_from<dynamic_set, std::from_range_t, std::span<const sparse_test_id>>);
+static_assert(std::constructible_from<dynamic_map, std::from_range_t, std::span<const std::pair<sparse_test_id, int>>>);
 
 } // namespace detail
 

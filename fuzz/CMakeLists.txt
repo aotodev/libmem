@@ -14,3 +14,5 @@ function(add_libmem_fuzzer name)
 endfunction()
 
 add_libmem_fuzzer(fuzz_multislab)
+add_libmem_fuzzer(fuzz_sparse_set)
+add_libmem_fuzzer(fuzz_sparse_map)
