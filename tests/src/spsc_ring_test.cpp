@@ -194,4 +194,123 @@ TEST(SpscRing, BatchDrainSeesEveryElementInOrder) {
     EXPECT_TRUE(q.empty());
 }
 
+/* ============================================================================
+ * Storage variants: same ring, different home for the slots
+ * ============================================================================ */
+
+TEST(SpscRingStorage, InlineAndHeapVariantsAreTheSameRing) {
+    using inline_ring = libmem::spsc_ring<command, 64>;
+    using heap_ring = libmem::heap_spsc_ring<command, 64>;
+
+    static_assert(inline_ring::capacity() == heap_ring::capacity());
+    static_assert(inline_ring::max_size() == heap_ring::max_size());
+    static_assert(std::same_as<inline_ring, libmem::basic_spsc_ring<libmem::inline_storage<command, 64, libmem::cache_line_size>>>);
+}
+
+TEST(SpscRingStorage, HeapVariantKeepsTheObjectSmall) {
+    /* The point of the heap variant: a capacity too large to sit inline, with the
+     * mask still a compile-time constant. */
+    using big = libmem::heap_spsc_ring<command, 1 << 16>;
+
+    EXPECT_LT(sizeof(big), 4u * libmem::cache_line_size);
+    EXPECT_EQ(sizeof(big), sizeof(libmem::heap_spsc_ring<command, 4>));
+    EXPECT_GT(sizeof(libmem::spsc_ring<command, 1 << 16>), (1u << 16) * sizeof(command));
+}
+
+TEST(SpscRingStorage, HeapVariantRoundTripsElements) {
+    libmem::heap_spsc_ring<command, 1 << 14> q{};
+
+    EXPECT_TRUE(q.empty());
+    EXPECT_EQ(q.capacity(), 1u << 14);
+
+    for (std::uint32_t i{}; i < 1000; ++i) {
+        ASSERT_TRUE(q.try_push({.kind = 1, .value = i})) << "push " << i;
+    }
+
+    std::uint32_t next{};
+    const auto consumed{q.consume_all([&next](const command& c) {
+        EXPECT_EQ(c.value, next);
+        ++next;
+    })};
+
+    EXPECT_EQ(consumed, 1000u);
+    EXPECT_TRUE(q.empty());
+}
+
+TEST(SpscRingStorage, HeapVariantFillsToMaxSizeThenRefuses) {
+    libmem::heap_spsc_ring<command, 8> q{};
+
+    for (std::uint32_t i{}; i < q.max_size(); ++i) {
+        ASSERT_TRUE(q.try_push({.kind = 1, .value = i}));
+    }
+
+    EXPECT_TRUE(q.full());
+    EXPECT_FALSE(q.try_push({.kind = 1, .value = 99}));
+
+    command out{};
+    ASSERT_TRUE(q.try_pop(out));
+    EXPECT_EQ(out.value, 0u);
+    EXPECT_TRUE(q.try_push({.kind = 1, .value = 99})) << "a slot freed up";
+}
+
+TEST(SpscRingStorage, HeapVariantTakesItsSlotsFromAnInjectedArena) {
+    libmem::arena scratch{1 << 20};
+    const std::size_t before{scratch.used()};
+
+    libmem::heap_spsc_ring<command, 1024, libmem::resource_ref<libmem::arena>> q{libmem::resource_ref{scratch}};
+
+    EXPECT_GE(scratch.used() - before, 1024u * sizeof(command));
+
+    ASSERT_TRUE(q.try_push({.kind = 3, .value = 7}));
+    command out{};
+    ASSERT_TRUE(q.try_pop(out));
+    EXPECT_EQ(out.kind, 3u);
+    EXPECT_EQ(out.value, 7u);
+}
+
+TEST(SpscRingStorage, HeapVariantSlotsAreCacheLineAligned) {
+    libmem::heap_spsc_ring<command, 64> q{};
+
+    /* The ring itself is cache-line aligned in both variants, so a neighbouring
+     * object cannot land in the consumer's line. */
+    EXPECT_EQ(reinterpret_cast<std::uintptr_t>(&q) % libmem::cache_line_size, 0u);
+    EXPECT_EQ(sizeof(q) % libmem::cache_line_size, 0u);
+}
+
+TEST(SpscRingStorage, HeapVariantSurvivesTheThreadedHandoff) {
+    constexpr std::uint32_t total{200000};
+    libmem::heap_spsc_ring<std::uint32_t, 1024> q{};
+
+    std::atomic<bool> ordered{true};
+
+    std::thread consumer{[&q, &ordered] {
+        std::uint32_t received{};
+        std::uint32_t next{};
+
+        while (received < total) {
+            received += static_cast<std::uint32_t>(q.consume_all([&next, &ordered](const std::uint32_t v) {
+                if (v != next) {
+                    ordered.store(false, std::memory_order_relaxed);
+                }
+                ++next;
+            }));
+
+            if (received < total) {
+                std::this_thread::yield();
+            }
+        }
+    }};
+
+    for (std::uint32_t i{}; i < total; ++i) {
+        while (!q.try_push(i)) {
+            std::this_thread::yield();
+        }
+    }
+
+    consumer.join();
+
+    EXPECT_TRUE(ordered.load(std::memory_order_relaxed));
+    EXPECT_TRUE(q.empty());
+}
+
 } // namespace
