@@ -212,6 +212,8 @@ endif()
 # ---------------------------------------------------------------------------------------
 set(ModuleInterfaceFiles
     src/libmem/concepts.cppm
+    src/libmem/identifier.cppm
+    src/libmem/storage.cppm
     src/libmem/slab.cppm
     src/libmem/multislab.cppm
     src/libmem/arena.cppm
