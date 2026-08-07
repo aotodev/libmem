@@ -5,8 +5,8 @@
  * `pool<T>` is a node-based, bucketed sequence container that:
  *
  *   - Allocates fixed-size blocks (one per `T`) out of an auto-expanding
- *     `libmem::multislab`, deriving the block size from `sizeof(T)` /
- *     `alignof(T)`.
+ *     `libmem::multislab`, whose block geometry is exactly that of a `T[N]`:
+ *     stride `sizeof(T)`, alignment `alignof(T)`.
  *   - Guarantees **pointer and iterator stability** for every live element
  *     until that specific element is erased: insertions never relocate
  *     previously inserted elements.
@@ -39,19 +39,11 @@ namespace libmem {
 
 namespace detail {
 
-/** @brief Round `n` up to the nearest non-zero multiple of `m`. */
-consteval std::size_t round_up_to_multiple(const std::size_t n, const std::size_t m) noexcept {
-    const std::size_t v{n == 0 ? m : n};
-    return ((v + m - 1) / m) * m;
-}
+/** @brief Stride of one `T` block: blocks are laid out as a `T[N]`, so unpadded. */
+template <typename T> inline constexpr std::size_t pool_block_size_v{sizeof(T)};
 
-/**
- * @brief Block size used to store one `T` inside the underlying `multislab`.
- *
- * Rounded up to the cache-line constraint enforced by `valid_block_size`,
- * and never smaller than the alignment requirement of `T`.
- */
-template <typename T> inline constexpr std::size_t pool_block_size_v{round_up_to_multiple(std::max(sizeof(T), alignof(T)), cache_line_size)};
+/** @brief Alignment of one `T` block. */
+template <typename T> inline constexpr std::size_t pool_block_align_v{alignof(T)};
 
 /**
  * @brief Default number of blocks per slab page, targeting a ~16 KiB page
@@ -83,7 +75,7 @@ export template <typename T, std::uint32_t BlocksPerSlab = detail::default_pool_
     shrink_policy Policy = threshold_policy>
     requires std::is_object_v<T> && (BlocksPerSlab > 0)
 class pool {
-    using pool_type = multislab<detail::pool_block_size_v<T>, BlocksPerSlab, Resource, Policy>;
+    using pool_type = multislab<detail::pool_block_size_v<T>, BlocksPerSlab, Resource, Policy, detail::pool_block_align_v<T>>;
     using pool_iterator = typename pool_type::iterator;
 
 public:
@@ -101,6 +93,9 @@ public:
 
     /** @brief Block size (in bytes) of the underlying `multislab`. */
     static constexpr std::size_t block_size{pool_type::block_size};
+
+    /** @brief Alignment every element is placed at. */
+    static constexpr std::size_t block_alignment{pool_type::block_alignment};
 
     /** @brief Number of `T` slots per slab page. */
     static constexpr std::uint32_t blocks_per_slab{pool_type::blocks_per_slab};

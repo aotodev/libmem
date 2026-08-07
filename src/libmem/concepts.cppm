@@ -5,9 +5,10 @@
  * Collects the building blocks that multiple allocators and containers depend
  * on into a single module partition:
  *
- *   - `cache_line_size`:     alignment quantum for slab blocks.
+ *   - `cache_line_size`:     cache-line width, for keeping concurrent writers apart.
  *   - `default_alignment`:   default alignment for untyped arena allocations.
- *   - `valid_block_size`:    concept constraining slab block sizes.
+ *   - `valid_alignment`:     concept constraining an alignment argument.
+ *   - `valid_block_geometry`: concept constraining a (block size, block alignment) pair.
  *   - `memory_resource`:     concept for injectable allocation back-ends.
  *   - `aligned_memory_resource`: refinement that honours an explicit alignment.
  *   - `default_resource`:    `operator new` / `operator delete` resource.
@@ -31,12 +32,13 @@ namespace libmem {
  * ============================================================================ */
 
 /**
- * @brief Cache-line size used for slab block alignment validation.
+ * @brief Cache-line width, for keeping data touched by different threads apart.
  *
  * 32-bit ARM (ARMv7 and earlier) uses 32-byte cache lines; everything else we
- * target uses 64. Note this is the alignment *quantum* for `valid_block_size`,
- * so raising it would invalidate existing block sizes; it is deliberately not
- * bumped to 128 on Apple Silicon.
+ * target uses 64. It is deliberately not bumped to 128 on Apple Silicon.
+ *
+ * @note Pass it as an explicit alignment where two threads write neighbouring data; it is
+ *       not a general allocation quantum.
  */
 export inline constexpr std::size_t cache_line_size{
 #if defined(__arm__) && !defined(__aarch64__)
@@ -53,12 +55,28 @@ export inline constexpr std::size_t cache_line_size{
 export inline constexpr std::size_t default_alignment{alignof(std::max_align_t)};
 
 /* ============================================================================
- * Block-size concept
+ * Alignment and block-geometry concepts
  * ============================================================================ */
 
-/** @brief A valid slab block size: positive and cache-line aligned. */
+/** @brief A valid alignment argument: a non-zero power of two. */
 export template <std::size_t N>
-concept valid_block_size = (N > 0) && (N % cache_line_size == 0);
+concept valid_alignment = (N > 0) && ((N & (N - 1)) == 0);
+
+/**
+ * @brief A valid block geometry: `Size` is the stride between blocks, `Align` the alignment
+ *        each is guaranteed; `Size` must be a whole number of `Align`s.
+ *
+ * For blocks holding objects of type `T` the geometry is `<sizeof(T), alignof(T)>`.
+ */
+export template <std::size_t Size, std::size_t Align>
+concept valid_block_geometry = (Size > 0) && valid_alignment<Align> && (Size % Align == 0);
+
+static_assert(valid_block_geometry<sizeof(std::max_align_t), alignof(std::max_align_t)>);
+static_assert(valid_block_geometry<4, 4>);
+static_assert(!valid_block_geometry<4, 8>);
+static_assert(!valid_block_geometry<24, 16>);
+static_assert(!valid_alignment<0>);
+static_assert(!valid_alignment<24>);
 
 /* ============================================================================
  * Memory resource concept & default implementation

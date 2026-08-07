@@ -142,9 +142,9 @@ concept fixed_extent_storage = storage<S> && (S::static_capacity != dynamic_exte
 
 namespace detail {
 
-/** @brief A valid alignment: a power of two, and at least what `T` needs. */
+/** @brief A valid alignment for slots of `T`: a power of two, and at least what `T` needs. */
 template <typename T, std::size_t Align>
-concept valid_storage_alignment = (Align >= alignof(T)) && (Align > 0) && ((Align & (Align - 1)) == 0);
+concept valid_storage_alignment = valid_alignment<Align> && (Align >= alignof(T));
 
 /**
  * @brief Take `count` slots for `T` from `resource`.

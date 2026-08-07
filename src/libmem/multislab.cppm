@@ -38,8 +38,8 @@ namespace libmem {
 
 namespace detail {
 
-template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
-    using slab_type = slab<BlockSize, BlocksPerSlab>;
+template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, std::size_t BlockAlign> struct slab_node {
+    using slab_type = slab<BlockSize, BlocksPerSlab, BlockAlign>;
 
     slab_type allocator;
     slab_node* next{};
@@ -63,7 +63,7 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
 /**
  * @brief Auto-expanding multi-slab allocator for fixed-size blocks.
  *
- * @tparam BlockSize     Size of each block (must satisfy `valid_block_size`).
+ * @tparam BlockSize     Stride from one block to the next, in bytes.
  * @tparam BlocksPerSlab Number of blocks per slab page.
  * @tparam Resource      Backing memory resource (must satisfy `memory_resource`).
  * @tparam Policy        Shrink policy (must satisfy `shrink_policy`).
@@ -72,16 +72,18 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab> struct slab_node {
  * (completely allocated slabs). On deallocation, full slabs are moved back to
  * active; empty slabs are released based on the shrink policy.
  */
-export template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy>
-    requires valid_block_size<BlockSize> && (BlocksPerSlab > 0)
+export template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy,
+    std::size_t BlockAlign = default_alignment>
+    requires valid_block_geometry<BlockSize, BlockAlign> && (BlocksPerSlab > 0)
 class multislab {
-    using node_type = detail::slab_node<BlockSize, BlocksPerSlab>;
+    using node_type = detail::slab_node<BlockSize, BlocksPerSlab, BlockAlign>;
     using slab_type = typename node_type::slab_type;
 
     static constexpr std::size_t slab_memory_size{BlockSize * BlocksPerSlab};
 
 public:
     static constexpr std::size_t block_size{BlockSize};
+    static constexpr std::size_t block_alignment{BlockAlign};
     static constexpr std::uint32_t blocks_per_slab{BlocksPerSlab};
 
     /* ========================================================================
@@ -446,6 +448,40 @@ private:
         return iterator{node, node->on_full ? nullptr : full_, node->allocator.make_iterator(index), node->on_full};
     }
 
+    /**
+     * @brief Alignment the slab's backing memory is taken at.
+     *
+     * Aligning the base is enough: `BlockSize` is a whole number of `BlockAlign`s, so every
+     * block within the slab is `BlockAlign`-aligned too.
+     */
+    static constexpr std::size_t slab_alignment{BlockAlign};
+
+    /**
+     * @brief Take one slab's worth of backing memory, correctly aligned.
+     *
+     * @warning Must branch on the same condition as `free_slab_memory`: releasing an aligned
+     *          allocation through the unaligned `deallocate` is undefined.
+     */
+    void* allocate_slab_memory() {
+        if constexpr (aligned_memory_resource<Resource>) {
+            return resource_.allocate(slab_memory_size, slab_alignment);
+        } else {
+            static_assert(slab_alignment <= default_alignment,
+                "multislab: blocks aligned beyond default_alignment need an aligned_memory_resource, i.e. a resource with "
+                "allocate(size, align) / deallocate(ptr, size, align).");
+            return resource_.allocate(slab_memory_size);
+        }
+    }
+
+    /** @brief Release memory from `allocate_slab_memory`; branches identically to it. */
+    void free_slab_memory(void* ptr) noexcept {
+        if constexpr (aligned_memory_resource<Resource>) {
+            resource_.deallocate(ptr, slab_memory_size, slab_alignment);
+        } else {
+            resource_.deallocate(ptr, slab_memory_size);
+        }
+    }
+
     bool grow() {
         if (max_slabs_ && slab_count_ >= max_slabs_) {
             return false;
@@ -458,7 +494,7 @@ private:
         }
 
         /* Allocate the slab backing memory. */
-        void* slab_mem{resource_.allocate(slab_memory_size)};
+        void* slab_mem{allocate_slab_memory()};
         if (!slab_mem) [[unlikely]] {
             resource_.deallocate(node_mem, sizeof(node_type));
             return false;
@@ -536,7 +572,7 @@ private:
 
         void* raw{node->raw_memory};
         node->~node_type();
-        resource_.deallocate(raw, slab_memory_size);
+        free_slab_memory(raw);
         resource_.deallocate(node, sizeof(node_type));
 
         slab_count_--;
@@ -566,7 +602,7 @@ private:
             node_type* next{head->next};
             void* raw{head->raw_memory};
             head->~node_type();
-            resource_.deallocate(raw, slab_memory_size);
+            free_slab_memory(raw);
             resource_.deallocate(head, sizeof(node_type));
             head = next;
         }

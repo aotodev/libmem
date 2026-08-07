@@ -8,7 +8,7 @@
  * index-to-pointer arithmetic to shifts and masks.
  *
  * @code
- *     alignas(64) std::byte storage[4096 * 8];
+ *     alignas(alignof(std::max_align_t)) std::byte storage[4096 * 8];
  *     libmem::slab<4096, 8> pool{storage, sizeof(storage)};
  *     void* blk = pool.allocate();
  * @endcode
@@ -85,19 +85,21 @@ template <std::size_t Words> constexpr void bitmap_clear(std::array<std::uint64_
 /**
  * @brief Fixed-size slab allocator backed by user-provided memory.
  *
- * @tparam BlockSize  Size of each block in bytes (must satisfy `valid_block_size`).
+ * @tparam BlockSize  Stride from one block to the next, in bytes.
  * @tparam MaxBlocks  Maximum number of blocks the slab can manage.
+ * @tparam BlockAlign Alignment every block is guaranteed (see `valid_block_geometry`).
  *
- * The bitmap is stored inline (no heap allocation). All pointer arithmetic
- * reduces to compile-time constants where `BlockSize` is a power of two.
+ * The bitmap is stored inline (no heap allocation). Index-to-pointer arithmetic reduces to a
+ * shift where `BlockSize` is a power of two, and to a multiply otherwise.
  */
-export template <std::size_t BlockSize, std::uint32_t MaxBlocks>
-    requires valid_block_size<BlockSize> && (MaxBlocks > 0)
+export template <std::size_t BlockSize, std::uint32_t MaxBlocks, std::size_t BlockAlign = default_alignment>
+    requires valid_block_geometry<BlockSize, BlockAlign> && (MaxBlocks > 0)
 class slab {
     static constexpr std::size_t bitmap_words{detail::words_for(MaxBlocks)};
 
 public:
     static constexpr std::size_t block_size{BlockSize};
+    static constexpr std::size_t block_alignment{BlockAlign};
     static constexpr std::uint32_t capacity{MaxBlocks};
     static constexpr std::size_t required_memory{BlockSize * MaxBlocks};
 
@@ -106,12 +108,20 @@ public:
      * @param memory      Base pointer to the backing storage.
      * @param memory_size Size of the backing storage (must be >= `required_memory`).
      * @pre `memory != nullptr && memory_size >= required_memory`.
+     * @pre `memory` is at least `BlockAlign`-aligned.
+     *
+     * @warning Blocks are `memory + index * BlockSize`, so they inherit the base's alignment;
+     *          an under-aligned base cannot be repaired here. Use `alignas(BlockAlign)`
+     *          storage.
      */
     constexpr slab(void* memory, const std::size_t memory_size) noexcept
         : memory_{static_cast<std::byte*>(memory)}, block_count_{static_cast<std::uint32_t>(memory_size / BlockSize)} {
         assert(memory != nullptr);
         assert(memory_size >= BlockSize);
         assert(block_count_ <= MaxBlocks);
+        /* Short-circuited: reinterpret_cast is ill-formed in constant evaluation. */
+        assert((std::is_constant_evaluated() || reinterpret_cast<std::uintptr_t>(memory) % BlockAlign == 0) &&
+               "slab: backing memory must be aligned to BlockAlign");
     }
 
     /**

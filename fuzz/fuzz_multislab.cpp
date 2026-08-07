@@ -84,6 +84,20 @@ struct counting_resource {
         s->live_bytes -= size;
         ::operator delete(ptr, size);
     }
+
+    /* multislab takes its slab memory through these, so a resource backing one must be an
+     * aligned_memory_resource. */
+    void* allocate(const std::size_t size, const std::size_t align) {
+        ++s->allocs;
+        s->live_bytes += size;
+        return ::operator new(size, std::align_val_t{align});
+    }
+
+    void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept {
+        ++s->frees;
+        s->live_bytes -= size;
+        ::operator delete(ptr, size, std::align_val_t{align});
+    }
 };
 
 constexpr std::size_t live_cap{1024};
