@@ -166,6 +166,54 @@ TEST(VectorConcepts, EachAliasReportsWhatItsStorageCanDo) {
     static_assert(unmovable::growable, "it still grows, it just cannot be moved");
 }
 
+TEST(VectorConcepts, InlineVectorIsUsableInConstantExpressions) {
+    /* The claim `std::inplace_vector` makes, and the reason inline_storage holds a
+     * real T[N] rather than a byte array for a trivial T. A runtime check would
+     * pass either way, so this has to be a static_assert. */
+    constexpr int folded{[] {
+        libmem::inline_vector<int, 8> v{};
+        v.push_back(10);
+        v.push_back(20);
+        v.push_back(30);
+        v.erase(v.begin());
+
+        int sum{};
+        for (const int x : v) {
+            sum += x;
+        }
+        return sum;
+    }()};
+    static_assert(folded == 50);
+    EXPECT_EQ(folded, 50);
+
+    static_assert(libmem::inline_storage<int, 8>::constexpr_usable);
+    /* And no size or alignment was traded for it. */
+    static_assert(sizeof(libmem::inline_vector<int, 1024>) >= 1024 * sizeof(int));
+    static_assert(sizeof(libmem::inline_storage<int, 1024>) == 1024 * sizeof(int));
+}
+
+TEST(VectorConcepts, ANonTrivialElementFallsBackToBytesButStillWorks) {
+    /* Outside the trivial bar the slots are raw bytes again, so there is no
+     * constant evaluation, but nothing else changes. */
+    static_assert(!libmem::inline_storage<std::string, 4>::constexpr_usable);
+
+    libmem::inline_vector<std::string, 4> v{};
+    ASSERT_NE(v.push_back("hello"), nullptr);
+    ASSERT_NE(v.emplace_back("world"), nullptr);
+
+    EXPECT_EQ(v.size(), 2u);
+    EXPECT_EQ(v[0], "hello");
+    EXPECT_EQ(v[1], "world");
+
+    libmem::inline_vector<std::string, 4> moved{std::move(v)};
+    EXPECT_EQ(moved.size(), 2u);
+    EXPECT_EQ(moved[1], "world");
+
+    const auto cloned{moved.clone()};
+    EXPECT_EQ(cloned.size(), 2u);
+    EXPECT_EQ(cloned[0], "hello");
+}
+
 TEST(VectorConcepts, IsAContiguousRangeThroughConst) {
     static_assert(std::ranges::contiguous_range<libmem::vector<int>>);
     static_assert(std::ranges::contiguous_range<const libmem::vector<int>>);

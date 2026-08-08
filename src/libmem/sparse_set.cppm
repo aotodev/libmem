@@ -178,7 +178,7 @@ public:
      * Construction / destruction
      * ======================================================================== */
 
-    sparse_set()
+    constexpr sparse_set()
         requires std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
     = default;
 
@@ -190,7 +190,7 @@ public:
      */
     template <typename... Args>
         requires std::constructible_from<SparseIndex, Args&...> && std::constructible_from<DenseStorage, Args&...>
-    sparse_set(copy_of_t, const sparse_set& source, Args&&... args) : sparse_{args...}, dense_{args...} {
+    constexpr sparse_set(copy_of_t, const sparse_set& source, Args&&... args) : sparse_{args...}, dense_{args...} {
         static_cast<void>(insert_range(source));
     }
 
@@ -209,7 +209,7 @@ public:
     template <typename... Args>
         requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, sparse_set> && ...) && std::constructible_from<SparseIndex, Args&...> &&
                     std::constructible_from<DenseStorage, Args&...>
-    explicit sparse_set(Args&&... args) : sparse_{args...}, dense_{args...} {}
+    constexpr explicit sparse_set(Args&&... args) : sparse_{args...}, dense_{args...} {}
 
     /**
      * @brief Construct from a range of ids, so `std::ranges::to` can build one.
@@ -221,7 +221,7 @@ public:
     template <std::ranges::input_range R>
         requires std::convertible_to<std::ranges::range_reference_t<R>, const Id&> && std::default_initializable<SparseIndex> &&
                  std::default_initializable<DenseStorage>
-    sparse_set(std::from_range_t, R&& range) : sparse_set() {
+    constexpr sparse_set(std::from_range_t, R&& range) : sparse_set() {
         insert_range(std::forward<R>(range));
     }
 
@@ -229,7 +229,7 @@ public:
     sparse_set& operator=(const sparse_set&) = delete;
 
     /** @brief Storage whose slots travel: both arrays come across as pointers. */
-    sparse_set(sparse_set&& other) noexcept
+    constexpr sparse_set(sparse_set&& other) noexcept
         requires relocatable
         : sparse_{std::move(other.sparse_)}, dense_{std::move(other.dense_)}, size_{std::exchange(other.size_, 0)} {}
 
@@ -240,14 +240,14 @@ public:
      *       leaves no half-moved state to unwind: the sparse index is drained in
      *       the mem-initialiser, before the dense ids are touched.
      */
-    sparse_set(sparse_set&& other) noexcept
+    constexpr sparse_set(sparse_set&& other) noexcept
         requires(!relocatable) && std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage> &&
                 std::is_nothrow_move_constructible_v<Id>
         : sparse_{std::move(other.sparse_)} {
         adopt_dense(other);
     }
 
-    sparse_set& operator=(sparse_set&& other) noexcept
+    constexpr sparse_set& operator=(sparse_set&& other) noexcept
         requires relocatable
     {
         if (this != &other) {
@@ -259,7 +259,7 @@ public:
         return *this;
     }
 
-    sparse_set& operator=(sparse_set&& other) noexcept
+    constexpr sparse_set& operator=(sparse_set&& other) noexcept
         requires(!relocatable) && std::is_nothrow_move_constructible_v<Id>
     {
         if (this != &other) {
@@ -270,7 +270,7 @@ public:
         return *this;
     }
 
-    ~sparse_set() { destroy_all(); }
+    constexpr ~sparse_set() { destroy_all(); }
 
     /* ========================================================================
      * Capacity
@@ -293,7 +293,7 @@ public:
      * @return `false` when the storage could not supply the space, leaving the
      *         set untouched. Always `false` past a fixed extent.
      */
-    bool reserve(const size_type n) {
+    constexpr bool reserve(const size_type n) {
         if (dense_.capacity() >= n) {
             return true;
         }
@@ -313,7 +313,7 @@ public:
      * @return `false` when the storage could not supply the space, leaving the
      *         set untouched.
      */
-    bool reserve_for(const Id& id) {
+    constexpr bool reserve_for(const Id& id) {
         const size_type at{to_index(id)};
         assert(at != npos && "sparse_set: id maps to the reserved npos subscript");
 
@@ -325,13 +325,13 @@ public:
      * ======================================================================== */
 
     /** @brief Whether `id` is in the set. */
-    bool contains(const Id& id) const noexcept { return sparse_.get(to_index(id)) != npos; }
+    constexpr bool contains(const Id& id) const noexcept { return sparse_.get(to_index(id)) != npos; }
 
     /** @brief Dense position of `id`, or `npos` when it is absent. */
-    size_type index_of(const Id& id) const noexcept { return sparse_.get(to_index(id)); }
+    constexpr size_type index_of(const Id& id) const noexcept { return sparse_.get(to_index(id)); }
 
     /** @brief The id at dense position `index`. */
-    const Id& operator[](const size_type index) const noexcept {
+    constexpr const Id& operator[](const size_type index) const noexcept {
         assert(index < size_ && "sparse_set: dense index out of range");
         return dense_.data()[index];
     }
@@ -346,14 +346,14 @@ public:
      * Const throughout: rewriting an id in place would desynchronise it from the
      * sparse array that points at it.
      */
-    const_iterator begin() const noexcept { return dense_.data(); }
-    const_iterator end() const noexcept { return dense_.data() + size_; }
+    constexpr const_iterator begin() const noexcept { return dense_.data(); }
+    constexpr const_iterator end() const noexcept { return dense_.data() + size_; }
 
-    const_iterator cbegin() const noexcept { return begin(); }
-    const_iterator cend() const noexcept { return end(); }
+    constexpr const_iterator cbegin() const noexcept { return begin(); }
+    constexpr const_iterator cend() const noexcept { return end(); }
 
     /** @brief The member ids as one contiguous view, in dense order. */
-    std::span<const Id> keys() const noexcept { return {dense_.data(), size_}; }
+    constexpr std::span<const Id> keys() const noexcept { return {dense_.data(), size_}; }
 
     /* ========================================================================
      * Modifiers
@@ -367,7 +367,7 @@ public:
      *         storage could not make room.
      * @pre `id != null_id_v<Id>`.
      */
-    insert_result insert(const Id& id) {
+    constexpr insert_result insert(const Id& id) {
         assert(!(id == null_id_v<Id>) && "sparse_set: the null id is reserved and not insertable");
 
         const size_type at{to_index(id)};
@@ -390,7 +390,7 @@ public:
      */
     template <std::ranges::input_range R>
         requires std::convertible_to<std::ranges::range_reference_t<R>, const Id&>
-    size_type insert_range(R&& range) {
+    constexpr size_type insert_range(R&& range) {
         size_type added{};
         for (const Id& id : range) {
             if (insert(id).inserted) {
@@ -404,7 +404,7 @@ public:
      * @brief Remove `id`, swapping the last dense element into its place.
      * @return A falsy result when `id` was not in the set.
      */
-    erase_result erase(const Id& id) {
+    constexpr erase_result erase(const Id& id) {
         const size_type at{to_index(id)};
         const size_type index{sparse_.get(at)};
         if (index == npos) {
@@ -434,7 +434,7 @@ public:
      * O(size), not O(index_capacity): only the tombstones of the ids actually
      * present have to be restored.
      */
-    void clear() noexcept {
+    constexpr void clear() noexcept {
         const Id* dense{dense_.data()};
 
         for (size_type i{}; i < size_; ++i) {
@@ -455,7 +455,7 @@ public:
      * The fixed-extent counterpart to `try_clone`: both sets have the same static
      * extent, so every id fits and there is nothing to report.
      */
-    sparse_set clone() const
+    constexpr sparse_set clone() const
         requires fixed_extent_storage<DenseStorage> && std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
     {
         if constexpr (resourced_storage<DenseStorage>) {
@@ -473,7 +473,7 @@ public:
      *
      * @return `std::nullopt` when the storage could not take every id.
      */
-    std::optional<sparse_set> try_clone() const
+    constexpr std::optional<sparse_set> try_clone() const
         requires std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
     {
         std::optional<sparse_set> copy{};
@@ -510,7 +510,7 @@ private:
      * @pre Both arrays already have room; see `reserve` and `reserve_for`.
      * @return The new dense position.
      */
-    size_type push_back_reserved(const Id& id, const size_type at) {
+    constexpr size_type push_back_reserved(const Id& id, const size_type at) {
         /* Construct first: if the copy throws, neither the sparse slot nor the
          * size has been touched yet. */
         std::construct_at(dense_.data() + size_, id);
@@ -520,7 +520,7 @@ private:
 
     /* The sparse index owns its own slot lifetimes, so there is nothing to clean
      * up here but the dense elements. */
-    void destroy_all() noexcept {
+    constexpr void destroy_all() noexcept {
         std::destroy_n(dense_.data(), size_);
         size_ = 0;
     }
@@ -529,10 +529,10 @@ private:
      * @brief Relocate `other`'s dense ids into these slots and empty it.
      * @pre This dense array holds no live ids, and `other.sparse_` has already been drained.
      */
-    void adopt_dense(sparse_set& other) noexcept {
+    constexpr void adopt_dense(sparse_set& other) noexcept {
         assert(other.size_ <= dense_.capacity() && "sparse_set: source does not fit the destination slots");
 
-        std::uninitialized_move_n(other.dense_.data(), other.size_, dense_.data());
+        detail::relocate_n(other.dense_.data(), other.size_, dense_.data());
         size_ = std::exchange(other.size_, 0);
         std::destroy_n(other.dense_.data(), size_);
     }
@@ -619,7 +619,7 @@ public:
      * Construction / destruction
      * ======================================================================== */
 
-    sparse_map()
+    constexpr sparse_map()
         requires std::default_initializable<key_set> && std::default_initializable<value_storage>
     = default;
 
@@ -631,7 +631,7 @@ public:
      */
     template <typename... Args>
         requires std::constructible_from<key_set, Args&...> && std::constructible_from<value_storage, Args&...> && std::copy_constructible<T>
-    sparse_map(copy_of_t, const sparse_map& source, Args&&... args) : keys_{args...}, values_{args...} {
+    constexpr sparse_map(copy_of_t, const sparse_map& source, Args&&... args) : keys_{args...}, values_{args...} {
         for (const auto& [id, value] : source) {
             if (!emplace(id, value).first) {
                 break;
@@ -646,7 +646,7 @@ public:
     template <typename... Args>
         requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, sparse_map> && ...) && std::constructible_from<key_set, Args&...> &&
                     std::constructible_from<value_storage, Args&...>
-    explicit sparse_map(Args&&... args) : keys_{args...}, values_{args...} {}
+    constexpr explicit sparse_map(Args&&... args) : keys_{args...}, values_{args...} {}
 
     /**
      * @brief Construct from a range of `(id, payload)` pairs, so `std::ranges::to` can build one.
@@ -657,7 +657,7 @@ public:
      */
     template <std::ranges::input_range R>
         requires detail::pair_range_for<R, Id, T> && std::default_initializable<key_set> && std::default_initializable<value_storage>
-    sparse_map(std::from_range_t, R&& range) : sparse_map() {
+    constexpr sparse_map(std::from_range_t, R&& range) : sparse_map() {
         insert_range(std::forward<R>(range));
     }
 
@@ -665,7 +665,7 @@ public:
     sparse_map& operator=(const sparse_map&) = delete;
 
     /** @brief Storage whose slots travel: both arrays come across as pointers. */
-    sparse_map(sparse_map&& other) noexcept
+    constexpr sparse_map(sparse_map&& other) noexcept
         requires relocatable
         : keys_{std::move(other.keys_)}, values_{std::move(other.values_)} {}
 
@@ -676,7 +676,7 @@ public:
      *       leaves no half-moved state. The payloads are relocated *before* the key
      *       set is moved, so `other.size()` still describes them while they travel.
      */
-    sparse_map(sparse_map&& other) noexcept
+    constexpr sparse_map(sparse_map&& other) noexcept
         requires(!relocatable) && std::default_initializable<key_set> && std::default_initializable<value_storage> && std::is_nothrow_move_constructible_v<T> &&
                 std::movable<key_set>
     {
@@ -684,7 +684,7 @@ public:
         keys_ = std::move(other.keys_);
     }
 
-    sparse_map& operator=(sparse_map&& other) noexcept
+    constexpr sparse_map& operator=(sparse_map&& other) noexcept
         requires relocatable
     {
         if (this != &other) {
@@ -695,7 +695,7 @@ public:
         return *this;
     }
 
-    sparse_map& operator=(sparse_map&& other) noexcept
+    constexpr sparse_map& operator=(sparse_map&& other) noexcept
         requires(!relocatable) && std::is_nothrow_move_constructible_v<T> && std::movable<key_set>
     {
         if (this != &other) {
@@ -706,7 +706,7 @@ public:
         return *this;
     }
 
-    ~sparse_map() { clear(); }
+    constexpr ~sparse_map() { clear(); }
 
     /* ========================================================================
      * Capacity
@@ -726,7 +726,7 @@ public:
      *
      * @return `false` when either storage could not supply the space.
      */
-    bool reserve(const size_type n) {
+    constexpr bool reserve(const size_type n) {
         if (values_.capacity() < n) {
             if constexpr (growable_storage<value_storage>) {
                 if (!relocate_grow(values_, n, keys_.size())) {
@@ -744,7 +744,7 @@ public:
      * ======================================================================== */
 
     /** @brief Whether `id` has an entry. */
-    bool contains(const Id& id) const noexcept { return keys_.contains(id); }
+    constexpr bool contains(const Id& id) const noexcept { return keys_.contains(id); }
 
     /** @brief Pointer to the payload of `id`, or `nullptr` when absent. */
     constexpr auto* find(this auto&& self, const Id& id) noexcept {
@@ -767,7 +767,7 @@ public:
      * ======================================================================== */
 
     /** @brief The member ids, in dense order. */
-    std::span<const Id> keys() const noexcept { return keys_.keys(); }
+    constexpr std::span<const Id> keys() const noexcept { return keys_.keys(); }
 
     /** @brief The payloads, in the same order as `keys()`. */
     constexpr auto values(this auto&& self) noexcept { return std::span{self.values_.data(), self.keys_.size()}; }
@@ -805,7 +805,7 @@ public:
      */
     template <typename... Args>
         requires std::constructible_from<T, Args...>
-    std::pair<T*, bool> emplace(const Id& id, Args&&... args) {
+    constexpr std::pair<T*, bool> emplace(const Id& id, Args&&... args) {
         if (const size_type existing{keys_.index_of(id)}; existing != npos) {
             return {values_.data() + existing, false};
         }
@@ -848,7 +848,7 @@ public:
      */
     template <std::ranges::input_range R>
         requires detail::pair_range_for<R, Id, T>
-    size_type insert_range(R&& range) {
+    constexpr size_type insert_range(R&& range) {
         size_type added{};
         for (auto&& entry : range) {
             if (emplace(std::get<0>(entry), std::get<1>(std::forward<decltype(entry)>(entry))).second) {
@@ -861,7 +861,7 @@ public:
     /** @brief Insert `value` for `id`, or overwrite the payload if `id` already has one. */
     template <typename V>
         requires std::constructible_from<T, V&&> && std::assignable_from<T&, V&&>
-    std::pair<T*, bool> insert_or_assign(const Id& id, V&& value) {
+    constexpr std::pair<T*, bool> insert_or_assign(const Id& id, V&& value) {
         if (const size_type existing{keys_.index_of(id)}; existing != npos) {
             T* slot{values_.data() + existing};
             *slot = std::forward<V>(value);
@@ -874,7 +874,7 @@ public:
      * @brief Remove the entry for `id`, swapping the last one into its place.
      * @return `false` when `id` had no entry.
      */
-    bool erase(const Id& id) {
+    constexpr bool erase(const Id& id) {
         const auto removed{keys_.erase(id)};
         if (!removed) {
             return false;
@@ -894,7 +894,7 @@ public:
     }
 
     /** @brief Destroy every payload and empty the key set, keeping the capacity. */
-    void clear() noexcept {
+    constexpr void clear() noexcept {
         std::destroy_n(values_.data(), keys_.size());
         keys_.clear();
     }
@@ -909,7 +909,7 @@ public:
      * The fixed-extent counterpart to `try_clone`: both maps have the same static
      * extent, so every entry fits and there is nothing to report.
      */
-    sparse_map clone() const
+    constexpr sparse_map clone() const
         requires fixed_extent_storage<DenseStorage> && std::default_initializable<key_set> && std::default_initializable<value_storage> &&
                  std::copy_constructible<T>
     {
@@ -926,7 +926,7 @@ public:
      * @return `std::nullopt` when the storage could not take every entry.
      * @throws Whatever `T`'s copy constructor throws.
      */
-    std::optional<sparse_map> try_clone() const
+    constexpr std::optional<sparse_map> try_clone() const
         requires std::default_initializable<key_set> && std::default_initializable<value_storage> && std::copy_constructible<T>
     {
         std::optional<sparse_map> copy{};
@@ -951,11 +951,11 @@ private:
      * @brief Relocate `other`'s payloads into these slots and destroy the originals.
      * @pre These payload slots hold nothing live, and `other.keys_` has not been moved yet.
      */
-    void adopt_values(sparse_map& other) noexcept {
+    constexpr void adopt_values(sparse_map& other) noexcept {
         const size_type count{other.keys_.size()};
         assert(count <= values_.capacity() && "sparse_map: source does not fit the destination slots");
 
-        std::uninitialized_move_n(other.values_.data(), count, values_.data());
+        detail::relocate_n(other.values_.data(), count, values_.data());
         std::destroy_n(other.values_.data(), count);
     }
 };
@@ -1043,6 +1043,35 @@ static_assert(std::movable<small_set>);
 /* Copying is never implicit; a deep copy goes through clone / try_clone. */
 static_assert(!std::copyable<dynamic_set>);
 static_assert(!std::copyable<inline_set>);
+
+/* An inline-backed set and map work during constant evaluation, the whole way
+ * through insert, erase, clear and clone. */
+consteval std::size_t constexpr_set() {
+    inline_set s{};
+    for (std::uint32_t i{}; i < 10; ++i) {
+        s.insert(sparse_test_id{i});
+    }
+    s.erase(sparse_test_id{3});
+    s.erase(sparse_test_id{7});
+
+    const inline_set copy{s.clone()};
+    return copy.size() + (copy.contains(sparse_test_id{3}) ? 100 : 0);
+}
+
+using inline_map = sparse_map<sparse_test_id, int, inline_storage<sparse_test_id, 32>>;
+
+consteval int constexpr_map() {
+    inline_map m{};
+    m.emplace(sparse_test_id{1}, 10);
+    m.emplace(sparse_test_id{2}, 20);
+    m.erase(sparse_test_id{1});
+
+    const int* found{m.find(sparse_test_id{2})};
+    return found ? *found : -1;
+}
+
+static_assert(constexpr_set() == 8);
+static_assert(constexpr_map() == 20);
 
 template <typename S>
 concept has_clone = requires(const S& s) { s.clone(); };

@@ -389,6 +389,41 @@ TEST(SparseSetSmall, SmallStorageAllocatesNothingUntilItOutgrowsBothArrays) {
     EXPECT_TRUE(s.insert(entity{7}).inserted);
 }
 
+TEST(SparseSetFixed, AnInlineSetIsUsableInConstantExpressions) {
+    /* Only a static_assert proves this; a runtime call would pass either way. */
+    constexpr std::size_t survivors{[] {
+        fixed_set s{};
+        for (std::uint32_t i{}; i < 12; ++i) {
+            s.insert(entity{i});
+        }
+        s.erase(entity{4});
+        s.erase(entity{9});
+        return s.size();
+    }()};
+    static_assert(survivors == 10);
+
+    constexpr bool sparse_dense_agree{[] {
+        fixed_set s{};
+        s.insert(entity{5});
+        s.insert(entity{11});
+        s.erase(entity{5});
+        /* The swap-and-pop must have fixed up the sparse subscript of the id that
+         * moved, and the erased one must be tombstoned. */
+        return !s.contains(entity{5}) && s.contains(entity{11}) && s[s.index_of(entity{11})] == entity{11};
+    }()};
+    static_assert(sparse_dense_agree);
+
+    constexpr std::size_t cloned{[] {
+        fixed_set s{};
+        s.insert(entity{1});
+        s.insert(entity{2});
+        return s.clone().size();
+    }()};
+    static_assert(cloned == 2);
+
+    EXPECT_EQ(survivors, 10u);
+}
+
 TEST(SparseSetFixed, AnInlineSetMovesByRelocatingAndLeavesTheSourceCoherent) {
     fixed_set from{};
     for (std::uint32_t i{}; i < 8; ++i) {

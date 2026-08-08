@@ -120,7 +120,7 @@ public:
      */
     template <typename... Args>
         requires std::constructible_from<Storage, Args...> && std::copy_constructible<value_type>
-    basic_vector(copy_of_t, const basic_vector& source, Args&&... args) : store_{std::forward<Args>(args)...} {
+    constexpr basic_vector(copy_of_t, const basic_vector& source, Args&&... args) : store_{std::forward<Args>(args)...} {
         static_cast<void>(append_range(source));
     }
 
@@ -134,7 +134,7 @@ public:
      */
     template <typename... Args>
         requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, basic_vector> && ...) && std::constructible_from<Storage, Args...>
-    explicit basic_vector(Args&&... args) : store_{std::forward<Args>(args)...} {}
+    constexpr explicit basic_vector(Args&&... args) : store_{std::forward<Args>(args)...} {}
 
     /**
      * @brief Construct from a range, so `std::ranges::to` can build one.
@@ -145,7 +145,7 @@ public:
      */
     template <std::ranges::input_range R>
         requires std::constructible_from<value_type, std::ranges::range_reference_t<R>> && std::default_initializable<Storage>
-    basic_vector(std::from_range_t, R&& range) {
+    constexpr basic_vector(std::from_range_t, R&& range) {
         static_cast<void>(append_range(std::forward<R>(range)));
     }
 
@@ -153,7 +153,7 @@ public:
     basic_vector& operator=(const basic_vector&) = delete;
 
     /** @brief Move by transferring the storage; the elements never move. */
-    basic_vector(basic_vector&& other) noexcept
+    constexpr basic_vector(basic_vector&& other) noexcept
         requires Storage::relocatable
         : store_{std::move(other.store_)}, size_{std::exchange(other.size_, 0)} {}
 
@@ -168,13 +168,13 @@ public:
      *       `noexcept` and a `std::vector<basic_vector<...>>` reallocates by moving
      *       rather than falling back to copying.
      */
-    basic_vector(basic_vector&& other) noexcept
+    constexpr basic_vector(basic_vector&& other) noexcept
         requires(!Storage::relocatable) && std::default_initializable<Storage> && std::is_nothrow_move_constructible_v<value_type>
     {
         take_over(other);
     }
 
-    basic_vector& operator=(basic_vector&& other) noexcept
+    constexpr basic_vector& operator=(basic_vector&& other) noexcept
         requires Storage::relocatable
     {
         if (this != &other) {
@@ -185,7 +185,7 @@ public:
         return *this;
     }
 
-    basic_vector& operator=(basic_vector&& other) noexcept
+    constexpr basic_vector& operator=(basic_vector&& other) noexcept
         requires(!Storage::relocatable) && std::is_nothrow_move_constructible_v<value_type>
     {
         if (this != &other) {
@@ -195,7 +195,7 @@ public:
         return *this;
     }
 
-    ~basic_vector() { clear(); }
+    constexpr ~basic_vector() { clear(); }
 
     /* ========================================================================
      * Capacity
@@ -211,7 +211,7 @@ public:
      *         vector untouched. Always `false` past a fixed extent.
      * @throws Whatever `T`'s move constructor throws, having changed nothing.
      */
-    bool reserve(const size_type n) {
+    constexpr bool reserve(const size_type n) {
         if (store_.capacity() >= n) {
             return true;
         }
@@ -227,7 +227,7 @@ public:
      *
      * Shrink-only, so unlike `resize` it requires nothing of `T`.
      */
-    void truncate(const size_type n) noexcept {
+    constexpr void truncate(const size_type n) noexcept {
         if (n < size_) {
             std::destroy_n(store_.data() + n, size_ - n);
             size_ = n;
@@ -238,17 +238,17 @@ public:
      * @brief Value-initialise or destroy elements at the back until `size() == n`.
      * @return `false` when growing to `n` was not possible, leaving the vector untouched.
      */
-    bool resize(const size_type n)
+    constexpr bool resize(const size_type n)
         requires std::default_initializable<value_type>
     {
-        return resize_to(n, [](value_type* first, const size_type count) { std::uninitialized_value_construct_n(first, count); });
+        return resize_to(n, [](value_type* first, const size_type count) { detail::value_construct_n(first, count); });
     }
 
     /** @brief As `resize(n)`, filling any new elements with copies of `value`. */
-    bool resize(const size_type n, const value_type& value)
+    constexpr bool resize(const size_type n, const value_type& value)
         requires std::copy_constructible<value_type>
     {
-        return resize_to(n, [&value](value_type* first, const size_type count) { std::uninitialized_fill_n(first, count, value); });
+        return resize_to(n, [&value](value_type* first, const size_type count) { detail::fill_construct_n(first, count, value); });
     }
 
     /* ========================================================================
@@ -306,7 +306,7 @@ public:
      */
     template <typename... Args>
         requires std::constructible_from<value_type, Args...>
-    value_type* emplace_back(Args&&... args) {
+    constexpr value_type* emplace_back(Args&&... args) {
         if (!reserve(size_ + 1)) {
             return nullptr;
         }
@@ -319,14 +319,14 @@ public:
     }
 
     /** @brief Copy an element onto the back; `nullptr` when there is no room. */
-    value_type* push_back(const value_type& value)
+    constexpr value_type* push_back(const value_type& value)
         requires std::copy_constructible<value_type>
     {
         return emplace_back(value);
     }
 
     /** @brief Move an element onto the back; `nullptr` when there is no room. */
-    value_type* push_back(value_type&& value)
+    constexpr value_type* push_back(value_type&& value)
         requires std::move_constructible<value_type>
     {
         return emplace_back(std::move(value));
@@ -339,7 +339,7 @@ public:
      */
     template <std::ranges::input_range R>
         requires std::constructible_from<value_type, std::ranges::range_reference_t<R>>
-    size_type append_range(R&& range) {
+    constexpr size_type append_range(R&& range) {
         /* One growth rather than log(n) of them when the length is known up front.
          * A failure here is not fatal: the loop below still appends what fits. */
         if constexpr (std::ranges::sized_range<R>) {
@@ -363,7 +363,7 @@ public:
      */
     template <std::ranges::input_range R>
         requires std::constructible_from<value_type, std::ranges::range_reference_t<R>>
-    size_type assign_range(R&& range) {
+    constexpr size_type assign_range(R&& range) {
         clear();
         return append_range(std::forward<R>(range));
     }
@@ -381,7 +381,7 @@ public:
      * @note On a `fixed_storage` the clone's own allocation is asserted, exactly as
      *       an ordinary `fixed_vector` construction is.
      */
-    basic_vector clone() const
+    constexpr basic_vector clone() const
         requires fixed_extent_storage<Storage> && std::default_initializable<Storage> && std::copy_constructible<value_type>
     {
         if constexpr (resourced_storage<Storage>) {
@@ -401,7 +401,7 @@ public:
      * @return `std::nullopt` when the storage could not take every element.
      * @throws Whatever `T`'s copy constructor throws.
      */
-    std::optional<basic_vector> try_clone() const
+    constexpr std::optional<basic_vector> try_clone() const
         requires std::default_initializable<Storage> && std::copy_constructible<value_type>
     {
         std::optional<basic_vector> copy{};
@@ -422,7 +422,7 @@ public:
      * @brief Destroy the last element.
      * @pre `!empty()`.
      */
-    void pop_back() noexcept {
+    constexpr void pop_back() noexcept {
         assert(size_ > 0 && "vector: pop_back() on an empty vector");
         std::destroy_at(store_.data() + --size_);
     }
@@ -432,7 +432,7 @@ public:
      * @return An iterator to the element that took its place, which is `end()`
      *         when the erased one was last.
      */
-    iterator erase(const const_iterator pos)
+    constexpr iterator erase(const const_iterator pos)
         requires std::is_move_assignable_v<value_type>
     {
         assert(pos >= cbegin() && pos < cend() && "vector: erase position out of range");
@@ -440,7 +440,7 @@ public:
     }
 
     /** @brief Erase `[first, last)`, shifting the tail down to close the gap. */
-    iterator erase(const const_iterator first, const const_iterator last)
+    constexpr iterator erase(const const_iterator first, const const_iterator last)
         requires std::is_move_assignable_v<value_type>
     {
         assert(first >= cbegin() && last <= cend() && first <= last && "vector: erase range out of range");
@@ -466,7 +466,7 @@ public:
      * @return An iterator to the element that took its place, which is `end()`
      *         when the erased one was last.
      */
-    iterator erase_unordered(const const_iterator pos)
+    constexpr iterator erase_unordered(const const_iterator pos)
         requires std::is_move_assignable_v<value_type>
     {
         assert(pos >= cbegin() && pos < cend() && "vector: erase position out of range");
@@ -486,7 +486,7 @@ public:
     }
 
     /** @brief Destroy every element, keeping the allocated capacity. */
-    void clear() noexcept {
+    constexpr void clear() noexcept {
         std::destroy_n(store_.data(), size_);
         size_ = 0;
     }
@@ -506,7 +506,7 @@ private:
      * @brief Become `other`: steal its block if it has one, otherwise move its elements.
      * @pre This vector holds no live elements.
      */
-    void take_over(basic_vector& other) noexcept {
+    constexpr void take_over(basic_vector& other) noexcept {
         if constexpr (transferable_storage<Storage>) {
             if (store_.adopt_from(other.store_)) {
                 size_ = std::exchange(other.size_, 0);
@@ -518,13 +518,13 @@ private:
          * have the same static extent, so the elements fit by construction. */
         assert(other.size_ <= store_.capacity() && "vector: source does not fit the destination slots");
 
-        std::uninitialized_move_n(other.data(), other.size_, store_.data());
+        detail::relocate_n(other.data(), other.size_, store_.data());
         size_ = other.size_;
         other.clear();
     }
 
     /** @brief Shared body of the two `resize` overloads; `fill` builds the new tail. */
-    template <typename F> bool resize_to(const size_type n, F&& fill) {
+    template <typename F> constexpr bool resize_to(const size_type n, F&& fill) {
         if (n <= size_) {
             truncate(n);
             return true;
@@ -604,6 +604,59 @@ static_assert(sizeof(small_vector<int, 8>) >= 8 * sizeof(int));
 /* Copying is never implicit; a deep copy goes through clone / try_clone. */
 static_assert(!std::copyable<vector<int>>);
 static_assert(!std::copyable<inline_vector<int, 8>>);
+
+/* ============================================================================
+ * Constant evaluation
+ * ============================================================================ */
+
+namespace detail {
+
+/** @brief Build, mutate and read an inline_vector entirely at compile time. */
+consteval int constexpr_round_trip() {
+    inline_vector<int, 8> v{};
+
+    for (int i{}; i < 5; ++i) {
+        v.push_back(i * 2);
+    }
+    v.erase(v.begin());
+    v.pop_back();
+
+    int sum{};
+    for (const int x : v) {
+        sum += x;
+    }
+    return sum;
+}
+
+/** @brief The same for a clone, which is the whole copy path. */
+consteval std::size_t constexpr_clone() {
+    inline_vector<int, 8> a{};
+    a.push_back(1);
+    a.push_back(2);
+
+    const inline_vector<int, 8> b{a.clone()};
+    return b.size();
+}
+
+} // namespace detail
+
+/* {0,2,4,6,8} minus the first and the last is {2,4,6}. */
+static_assert(detail::constexpr_round_trip() == 12);
+static_assert(detail::constexpr_clone() == 2);
+
+/* The slot array is a real T[N] where T allows it, so the storage costs nothing
+ * extra and stays exactly as large as before. */
+static_assert(inline_storage<int, 8>::constexpr_usable);
+static_assert(sizeof(inline_storage<int, 1024>) == 1024 * sizeof(int));
+static_assert(alignof(inline_storage<int, 8>) == alignof(int));
+static_assert(inline_storage<int, 8, cache_line_size>::alignment == cache_line_size);
+
+/* A type that is not trivially destructible falls back to raw bytes, which cannot
+ * be constant-evaluated but is otherwise unchanged. `std::inplace_vector` draws the
+ * line in the same place. */
+static_assert(!inline_storage<std::string, 4>::constexpr_usable);
+static_assert(sizeof(inline_storage<std::string, 4>) == 4 * sizeof(std::string));
+static_assert(std::movable<inline_vector<std::string, 4>>);
 
 namespace detail {
 

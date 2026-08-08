@@ -55,7 +55,7 @@ public:
     static_assert(std::atomic<size_type>::is_always_lock_free, "spsc_ring needs lock-free index atomics");
 
     /** @brief Construct with a default-constructed storage. */
-    basic_spsc_ring() noexcept(std::is_nothrow_default_constructible_v<value_type>)
+    constexpr basic_spsc_ring() noexcept(std::is_nothrow_default_constructible_v<value_type>)
         requires std::default_initializable<Storage>
     {
         construct_slots();
@@ -69,7 +69,7 @@ public:
      */
     template <typename... Args>
         requires(sizeof...(Args) > 0) && std::constructible_from<Storage, Args...>
-    explicit basic_spsc_ring(Args&&... args) noexcept(std::is_nothrow_default_constructible_v<value_type>) : storage_{std::forward<Args>(args)...} {
+    constexpr explicit basic_spsc_ring(Args&&... args) noexcept(std::is_nothrow_default_constructible_v<value_type>) : storage_{std::forward<Args>(args)...} {
         construct_slots();
     }
 
@@ -78,7 +78,7 @@ public:
     basic_spsc_ring(basic_spsc_ring&&) = delete;
     basic_spsc_ring& operator=(basic_spsc_ring&&) = delete;
 
-    ~basic_spsc_ring() { std::destroy_n(storage_.data(), capacity()); }
+    constexpr ~basic_spsc_ring() { std::destroy_n(storage_.data(), capacity()); }
 
     /// @brief Allocated slots.
     static constexpr size_type capacity() noexcept { return Storage::static_capacity; }
@@ -188,10 +188,10 @@ public:
 private:
     static constexpr size_type mask{Storage::static_capacity - 1};
 
-    void construct_slots() noexcept(std::is_nothrow_default_constructible_v<value_type>) {
+    constexpr void construct_slots() noexcept(std::is_nothrow_default_constructible_v<value_type>) {
         /* Every slot is a live object for the whole life of the ring: try_push
          * assigns into one, which needs an object there to assign to. */
-        std::uninitialized_value_construct_n(storage_.data(), capacity());
+        detail::value_construct_n(storage_.data(), capacity());
     }
 
     /* The slots come first so an inline storage, whose alignment the aliases below raise

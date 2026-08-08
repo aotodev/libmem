@@ -12,6 +12,23 @@ struct command {
 
 using ring = libmem::spsc_ring<command, 8>;
 
+/* Constant initialisation, which is as far as constant evaluation reaches for a
+ * ring: std::atomic has a constexpr constructor but no constexpr load or store, so
+ * one can be built at compile time and not used there. Worth having because a ring
+ * is usually a global: this has no dynamic initialiser and so cannot take part in
+ * the static-initialisation-order fiasco. */
+constinit libmem::spsc_ring<std::uint32_t, 4> static_queue{};
+
+TEST(SpscRing, IsConstantInitialised) {
+    EXPECT_TRUE(static_queue.empty());
+    EXPECT_EQ(static_queue.size_approx(), 0u);
+
+    ASSERT_TRUE(static_queue.try_push(7));
+    std::uint32_t out{};
+    ASSERT_TRUE(static_queue.try_pop(out));
+    EXPECT_EQ(out, 7u);
+}
+
 TEST(SpscRing, StartsEmpty) {
     ring q{};
 

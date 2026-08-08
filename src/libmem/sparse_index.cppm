@@ -94,7 +94,7 @@ public:
     static constexpr bool growable{growable_storage<Storage>};
     static constexpr bool relocatable{Storage::relocatable};
 
-    flat_sparse_index()
+    constexpr flat_sparse_index()
         requires std::default_initializable<Storage>
     {
         fill_from(0);
@@ -103,7 +103,7 @@ public:
     /** @brief Construct the underlying storage from `args`, typically a resource. */
     template <typename... Args>
         requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, flat_sparse_index> && ...) && std::constructible_from<Storage, Args...>
-    explicit flat_sparse_index(Args&&... args) : slots_{std::forward<Args>(args)...} {
+    constexpr explicit flat_sparse_index(Args&&... args) : slots_{std::forward<Args>(args)...} {
         fill_from(0);
     }
 
@@ -111,7 +111,7 @@ public:
     flat_sparse_index& operator=(const flat_sparse_index&) = delete;
 
     /** @brief Storage whose slots travel: the whole array comes across. */
-    flat_sparse_index(flat_sparse_index&& other) noexcept
+    constexpr flat_sparse_index(flat_sparse_index&& other) noexcept
         requires relocatable
         : slots_{std::move(other.slots_)} {}
 
@@ -123,14 +123,14 @@ public:
      *          would report `contains(id) == true` at `size() == 0`, and the stale
      *          position would index past the end.
      */
-    flat_sparse_index(flat_sparse_index&& other) noexcept
+    constexpr flat_sparse_index(flat_sparse_index&& other) noexcept
         requires(!relocatable) && std::default_initializable<Storage>
     {
         fill_from(0);
         drain(other);
     }
 
-    flat_sparse_index& operator=(flat_sparse_index&& other) noexcept
+    constexpr flat_sparse_index& operator=(flat_sparse_index&& other) noexcept
         requires relocatable
     {
         if (this != &other) {
@@ -140,7 +140,7 @@ public:
         return *this;
     }
 
-    flat_sparse_index& operator=(flat_sparse_index&& other) noexcept
+    constexpr flat_sparse_index& operator=(flat_sparse_index&& other) noexcept
         requires(!relocatable)
     {
         if (this != &other) {
@@ -150,13 +150,13 @@ public:
         return *this;
     }
 
-    ~flat_sparse_index() { release(); }
+    constexpr ~flat_sparse_index() { release(); }
 
     constexpr size_type covered() const noexcept { return slots_.capacity(); }
 
-    size_type get(const size_type at) const noexcept { return at < slots_.capacity() ? slots_.data()[at] : npos; }
+    constexpr size_type get(const size_type at) const noexcept { return at < slots_.capacity() ? slots_.data()[at] : npos; }
 
-    void set(const size_type at, const size_type index) noexcept {
+    constexpr void set(const size_type at, const size_type index) noexcept {
         assert(at < slots_.capacity() && "flat_sparse_index: subscript not reserved");
         slots_.data()[at] = index;
     }
@@ -166,7 +166,7 @@ public:
      * @return `false` when the storage could not supply the space, leaving the
      *         index untouched. Always `false` past a fixed extent.
      */
-    bool reserve_for(const size_type at) {
+    constexpr bool reserve_for(const size_type at) {
         assert(at != npos && "flat_sparse_index: npos is the reserved tombstone, not a subscript");
 
         if (at < slots_.capacity()) {
@@ -197,20 +197,20 @@ private:
      * lookup never reads uninitialised memory and growth never has to track a
      * separate initialised count.
      */
-    void fill_from(const size_type from) noexcept {
+    constexpr void fill_from(const size_type from) noexcept {
         size_type* slots{slots_.data()};
         for (size_type i{from}; i < slots_.capacity(); ++i) {
             std::construct_at(slots + i, npos);
         }
     }
 
-    void release() noexcept { std::destroy_n(slots_.data(), slots_.capacity()); }
+    constexpr void release() noexcept { std::destroy_n(slots_.data(), slots_.capacity()); }
 
     /**
      * @brief Copy `other`'s subscripts into these slots and tombstone every one of its own.
      * @pre These slots are all tombstoned.
      */
-    void drain(flat_sparse_index& other) noexcept {
+    constexpr void drain(flat_sparse_index& other) noexcept {
         size_type* mine{slots_.data()};
         size_type* theirs{other.slots_.data()};
         const size_type covered_here{slots_.capacity()};

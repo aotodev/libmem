@@ -207,6 +207,73 @@ template <typename T, std::size_t Align, memory_resource Resource> void free_slo
     }
 }
 
+/* ----------------------------------------------------------------------------
+ * Constexpr-usable stand-ins for the specialized memory algorithms
+ *
+ * libc++ has not yet made `std::uninitialized_move_n` and friends `constexpr`
+ * (P2283); libstdc++ has. Calling them directly would make every inline container
+ * constant-evaluable on GCC and not on Clang. These do the same work through
+ * `std::construct_at`, which has been constexpr since C++20, and keep the same
+ * roll-back-on-throw guarantee.
+ * ---------------------------------------------------------------------------- */
+
+/** @brief Move-construct `n` objects from `first` into the raw slots at `out`. */
+template <typename T> constexpr void relocate_n(T* first, const std::size_t n, T* out) {
+    if constexpr (std::is_nothrow_move_constructible_v<T>) {
+        for (std::size_t i{}; i < n; ++i) {
+            std::construct_at(out + i, std::move(first[i]));
+        }
+    } else {
+        std::size_t built{};
+        try {
+            for (; built < n; ++built) {
+                std::construct_at(out + built, std::move(first[built]));
+            }
+        } catch (...) {
+            std::destroy_n(out, built);
+            throw;
+        }
+    }
+}
+
+/** @brief Value-initialise `n` raw slots at `first`. */
+template <typename T> constexpr void value_construct_n(T* first, const std::size_t n) {
+    if constexpr (std::is_nothrow_default_constructible_v<T>) {
+        for (std::size_t i{}; i < n; ++i) {
+            std::construct_at(first + i);
+        }
+    } else {
+        std::size_t built{};
+        try {
+            for (; built < n; ++built) {
+                std::construct_at(first + built);
+            }
+        } catch (...) {
+            std::destroy_n(first, built);
+            throw;
+        }
+    }
+}
+
+/** @brief Copy-construct `value` into `n` raw slots at `first`. */
+template <typename T, typename U> constexpr void fill_construct_n(T* first, const std::size_t n, const U& value) {
+    if constexpr (std::is_nothrow_constructible_v<T, const U&>) {
+        for (std::size_t i{}; i < n; ++i) {
+            std::construct_at(first + i, value);
+        }
+    } else {
+        std::size_t built{};
+        try {
+            for (; built < n; ++built) {
+                std::construct_at(first + built, value);
+            }
+        } catch (...) {
+            std::destroy_n(first, built);
+            throw;
+        }
+    }
+}
+
 /** @brief Smallest capacity a growing storage ever allocates, so early inserts do not re-grow every time. */
 template <typename T> inline constexpr std::size_t growth_floor{sizeof(T) > 256 ? 1 : 256 / sizeof(T)};
 
@@ -227,6 +294,48 @@ template <typename T> constexpr std::size_t next_capacity(const std::size_t curr
  * inline_storage: slots inside the object
  * ============================================================================ */
 
+namespace detail {
+
+/**
+ * @brief Whether `T`'s inline slots can be a real `T[N]` rather than raw bytes.
+ *
+ * Trivial default construction lets the array be left alone at runtime, and
+ * trivial destruction makes `construct_at` over a slot that already holds an
+ * object well-defined. Those two, not `is_trivially_copyable`, are what the
+ * constexpr path needs.
+ */
+template <typename T>
+concept constexpr_inline_slots = std::is_trivially_default_constructible_v<T> && std::is_trivially_destructible_v<T>;
+
+/**
+ * @brief The slot array behind `inline_storage`, chosen so `T[N]` is used where it can be.
+ *
+ * Raw bytes cannot be reinterpreted during constant evaluation, so a byte array
+ * shuts `inline_vector` out of constexpr entirely. A real `T[N]` has no such
+ * problem and costs nothing extra: P1331 permits leaving it trivially
+ * default-initialised inside a `constexpr` constructor, so it is not zeroed at
+ * runtime either.
+ */
+template <typename T, std::size_t N, std::size_t Align, bool Trivial = constexpr_inline_slots<T>> struct inline_slots {
+    /* Deliberately uninitialised. A braced initialiser here would zero the whole
+     * array on every construction, which is exactly what this storage exists to
+     * avoid. */
+    alignas(Align) T slots[N];
+
+    constexpr T* data() noexcept { return slots; }
+    constexpr const T* data() const noexcept { return slots; }
+};
+
+/** Non-trivial `T`: raw bytes, and therefore no constant evaluation. */
+template <typename T, std::size_t N, std::size_t Align> struct inline_slots<T, N, Align, false> {
+    alignas(Align) std::byte slots[N * sizeof(T)];
+
+    T* data() noexcept { return reinterpret_cast<T*>(slots); }
+    const T* data() const noexcept { return reinterpret_cast<const T*>(slots); }
+};
+
+} // namespace detail
+
 /**
  * @brief `N` uninitialised slots for `T` held inside the storage object itself.
  *
@@ -238,6 +347,11 @@ template <typename T> constexpr std::size_t next_capacity(const std::size_t curr
  * @tparam N     Slot count.
  * @tparam Align Alignment of the slot array; at least `alignof(T)`. Raising it
  *               is how a container puts its buffer on a cache line.
+ *
+ * @note Usable in constant expressions when `T` is trivially default-constructible
+ *       and trivially destructible, which is the same bar `std::inplace_vector`
+ *       sets. A `T` outside it falls back to a byte array, and a container over it
+ *       still works, just not at compile time.
  */
 export template <typename T, std::size_t N, std::size_t Align = alignof(T)>
     requires std::is_object_v<T> && (N > 0) && detail::valid_storage_alignment<T, Align>
@@ -251,22 +365,25 @@ public:
     static constexpr size_type alignment{Align};
     static constexpr bool relocatable{false};
 
-    /* Not constexpr: the slots are deliberately left uninitialised, and reading
-     * them back out goes through a reinterpret_cast. */
-    inline_storage() noexcept = default;
+    /** @brief Whether this storage can be used during constant evaluation. */
+    static constexpr bool constexpr_usable{detail::constexpr_inline_slots<T>};
+
+    constexpr inline_storage() noexcept = default;
 
     inline_storage(const inline_storage&) = delete;
     inline_storage& operator=(const inline_storage&) = delete;
     inline_storage(inline_storage&&) = delete;
     inline_storage& operator=(inline_storage&&) = delete;
 
-    T* data() noexcept { return reinterpret_cast<T*>(slots_); }
-    const T* data() const noexcept { return reinterpret_cast<const T*>(slots_); }
+    constexpr T* data() noexcept { return slots_.data(); }
+    constexpr const T* data() const noexcept { return slots_.data(); }
 
     static constexpr size_type capacity() noexcept { return N; }
 
 private:
-    alignas(Align) std::byte slots_[N * sizeof(T)];
+    /* No initialiser: braces here would value-initialise the array and zero it on
+     * every construction. */
+    detail::inline_slots<T, N, Align> slots_;
 };
 
 /* ============================================================================
@@ -648,10 +765,10 @@ export template <growable_storage S> bool relocate_grow(S& store, const typename
 
     if (live > 0) {
         if constexpr (std::is_nothrow_move_constructible_v<T>) {
-            std::uninitialized_move_n(store.data(), live, block.data);
+            detail::relocate_n(store.data(), live, block.data);
         } else {
             try {
-                std::uninitialized_move_n(store.data(), live, block.data);
+                detail::relocate_n(store.data(), live, block.data);
             } catch (...) {
                 /* uninitialized_move_n has already destroyed whatever it managed
                  * to construct, so the new block is raw again and the old one
