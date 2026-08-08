@@ -134,7 +134,12 @@ public:
     /** @brief The dense extent, or `dynamic_extent` when it is a runtime property. */
     static constexpr size_type static_capacity{DenseStorage::static_capacity};
 
-    /** @brief Whether the set can be moved; false for inline storage, which cannot relocate. */
+    /**
+     * @brief Whether a move transfers the buffers instead of relocating the ids.
+     *
+     * A cost, not an availability: every set moves. `false` for inline storage,
+     * whose move copies the ids across and tombstones the source.
+     */
     static constexpr bool relocatable{DenseStorage::relocatable && SparseIndex::relocatable};
 
     /** @brief Outcome of `insert`: the dense position, and whether it was newly added. */
@@ -599,6 +604,8 @@ public:
     static constexpr size_type npos{key_set::npos};
     static constexpr bool growable{key_set::growable && growable_storage<value_storage>};
     static constexpr size_type static_capacity{key_set::static_capacity};
+
+    /** @brief Whether a move transfers the buffers instead of relocating the entries; see `sparse_set::relocatable`. */
     static constexpr bool relocatable{key_set::relocatable && value_storage::relocatable};
 
 private:

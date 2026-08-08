@@ -4,8 +4,8 @@
 [![clang](https://github.com/aotodev/libmem/actions/workflows/clang.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/clang.yml)
 [![fuzz](https://github.com/aotodev/libmem/actions/workflows/fuzz.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/fuzz.yml)
 
-A small, self-contained C++ memory allocator and container library. Built entirely
-with C++23/26 modules (`import std`), serving also as a testbed for idiomatic
+A self-contained C++ memory allocator and container library. Built entirely
+with C++20/23 modules (`import std`), serving also as a testbed for idiomatic
 modern C++: concepts, `constexpr` everything, deducing `this`, `std::ranges`
 integration, modules-only builds.
 
@@ -22,9 +22,14 @@ Clang >= 22 and GCC >= 15.
 | `typed_arena` | Bump allocator with LIFO destructor chain for arbitrary types. |
 | `pool` | Pointer-stable typed container (bitmap-based object pool) over `multislab`. |
 | `spsc_ring` | Lock-free single-producer single-consumer ring buffer with cached indices. |
-| `vector` | Contiguous growable sequence; `small_vector` is the small-buffer variant. |
+| `vector` | Contiguous growable sequence. |
+| `small_vector` | Same, holding its first `N` elements inline and spilling past them. |
+| `inline_vector` | Same, bounded at `N` inline elements; allocates nothing, ever. |
+| `fixed_vector` | Same, bounded at `N` with the slots on a resource instead of inline. |
 | `sparse_set` | Dense-packed id set, O(1) insert / erase / contains, contiguous iteration. |
 | `sparse_map` | `sparse_set` plus a payload per id; `keys()` and `values()` stay index-aligned. |
+| `resource_allocator` | Standard Allocator over any libmem resource, so an `arena` can back a `std::vector`. |
+| `allocator_resource` | The mirror: a standard Allocator backing a libmem container. |
 
 Everything lives in a single module (`import libmem;`) with partitions.
 
@@ -117,7 +122,7 @@ than a guarantee of exhaustive coverage. Details in
 
 ## Docs
 
-- [Storage](docs/storage.md): the four storage kinds, resources, the growth protocol, small-buffer support.
+- [Storage](docs/storage.md): the four storage kinds, resources, the growth protocol, small-buffer support, standard-container interop.
 - [Containers](docs/containers.md): the vector family, identifiers, sparse set and map, ranges interop.
 - [Complexity](docs/complexity.md): cost tables for every component.
 - [Testing](docs/testing.md): what the suites and fuzzers actually cover.
