@@ -62,3 +62,12 @@ with a paged one.
 The trade against `pool` is stability: `pool` never relocates a live element, while
 these relocate on growth exactly as `std::vector` does. Iterating is the mirror
 image, contiguous here versus a bitmap scan there.
+
+## Constant evaluation
+
+Free, in the sense that matters: `inline_storage` holds a real `T[N]` where the
+element type allows it, so `sizeof` and `alignof` are identical on both branches and
+the array is never zeroed. A container that constant-evaluates costs exactly what
+the same container costs at run time.
+
+See [containers.md](containers.md#constant-evaluation) for which containers qualify.

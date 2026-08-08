@@ -29,6 +29,37 @@ and resetting the alignment to `alignof(U)`. That is what lets a container hold
 several parallel arrays of different element types over one storage template
 argument, as `std::allocator_traits::rebind_alloc` does for allocators.
 
+## `inline_storage` and constant evaluation
+
+`inline_storage` holds its slots two different ways, chosen on the element type:
+
+| `T` | Representation | Constant evaluation |
+|-----|----------------|---------------------|
+| trivially default-constructible **and** trivially destructible | a real `T[N]` | yes |
+| anything else | `std::byte[N * sizeof(T)]` | no |
+
+`inline_storage<T, N>::constexpr_usable` reports which branch a `T` took. Standard
+library implementations of `std::inplace_vector` face the same obstacle and solve it
+the same way, so the set of element types that constant-evaluate is comparable.
+
+Raw bytes are the obstacle, not a missing keyword. `reinterpret_cast` is forbidden
+during constant evaluation, so a byte array can never be viewed as a `T*`. Nor does
+the single-member-union trick that constexpr `std::vector` uses help here: it yields
+constexpr access by *index* only, because taking `&slots[0].value` and adding one
+produces a one-past-the-end pointer and constructing through it is rejected. The
+`storage` concept hands out a `T*` that containers do arithmetic on, so a genuine
+array is the only representation satisfying both.
+
+Neither `sizeof` nor `alignof` changes, and nothing is zeroed. The array carries no
+initialiser, and P1331 permits leaving it trivially default-initialised inside a
+`constexpr` constructor, so an `inline_vector<int, 1024>` still costs nothing to
+construct at run time.
+
+The resource-backed kinds cannot follow, for an unrelated reason: they reach
+`::operator new` through their resource, and only `std::allocator<T>::allocate` is
+blessed for constant evaluation. Their members carry `constexpr` but can only ever
+run at run time.
+
 ## Resources
 
 `memory_resource` is the single allocation interface: `allocate(size)` and

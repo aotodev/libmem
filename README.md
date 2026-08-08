@@ -6,8 +6,8 @@
 
 A self-contained C++ memory allocator and container library. Built entirely
 with C++20/23 modules (`import std`), serving also as a testbed for idiomatic
-modern C++: concepts, `constexpr` everything, deducing `this`, `std::ranges`
-integration, modules-only builds.
+modern C++: concepts, deducing `this`, `std::ranges` integration, modules-only
+builds, and constant evaluation wherever the object model permits it.
 
 Compiler support for C++26 modules is still evolving; the library targets
 Clang >= 22 and GCC >= 15.
@@ -21,10 +21,10 @@ Clang >= 22 and GCC >= 15.
 | `arena` | Bump/region allocator for trivially-destructible types. |
 | `typed_arena` | Bump allocator with LIFO destructor chain for arbitrary types. |
 | `pool` | Pointer-stable typed container (bitmap-based object pool) over `multislab`. |
-| `spsc_ring` | Lock-free single-producer single-consumer ring buffer with cached indices. |
+| `spsc_ring` | Lock-free single-producer single-consumer ring buffer with cached indices; `constinit`-able. |
 | `vector` | Contiguous growable sequence. |
 | `small_vector` | Same, holding its first `N` elements inline and spilling past them. |
-| `inline_vector` | Same, bounded at `N` inline elements; allocates nothing, ever. |
+| `inline_vector` | Same, bounded at `N` inline elements; allocates nothing, ever, and works at compile time. |
 | `fixed_vector` | Same, bounded at `N` with the slots on a resource instead of inline. |
 | `sparse_set` | Dense-packed id set, O(1) insert / erase / contains, contiguous iteration. |
 | `sparse_map` | `sparse_set` plus a payload per id; `keys()` and `values()` stay index-aligned. |
@@ -76,6 +76,22 @@ move constructor halfway through) leaves the container exactly as it was.
 alignment will not compile against an over-aligned request rather than silently
 under-aligning.
 
+**The inline containers work at compile time.** `inline_vector`, `sparse_set`, and
+`sparse_map` over inline storage constant-evaluate end to end whenever the element
+type is trivially default-constructible and trivially destructible, at no cost in
+size or alignment:
+
+```cpp
+constexpr int total = [] {
+    libmem::inline_vector<int, 8> v{};
+    v.push_back(10);
+    v.push_back(20);
+    v.erase(v.begin());
+    return v[0];
+}();
+static_assert(total == 20);
+```
+
 **It interoperates both ways.** A `std::pmr::polymorphic_allocator` can back a
 libmem container, and `resource_allocator` turns any libmem resource into a standard
 Allocator, so an `arena` can back a `std::vector`, `std::list`, or `std::map`.
@@ -122,8 +138,8 @@ than a guarantee of exhaustive coverage. Details in
 
 ## Docs
 
-- [Storage](docs/storage.md): the four storage kinds, resources, the growth protocol, small-buffer support, standard-container interop.
-- [Containers](docs/containers.md): the vector family, identifiers, sparse set and map, ranges interop.
+- [Storage](docs/storage.md): the four storage kinds, resources, the growth protocol, small-buffer support, constant evaluation, standard-container interop.
+- [Containers](docs/containers.md): the vector family, identifiers, sparse set and map, copying and moving, ranges interop, constant evaluation.
 - [Complexity](docs/complexity.md): cost tables for every component.
 - [Testing](docs/testing.md): what the suites and fuzzers actually cover.
 - [Integration](docs/integration.md): consuming libmem from another CMake project.

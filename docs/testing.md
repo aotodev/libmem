@@ -45,6 +45,15 @@ claim the paged index exists to make.
 **Concurrency**: the two-thread handoff runs for both ring variants, also under
 **ThreadSanitizer** (`-DTHREAD_SANITIZER=ON`).
 
+**Constant evaluation**: pinned with `static_assert` rather than an ordinary test,
+because a runtime call passes whether or not the function can be constant-evaluated,
+so only a compile-time assertion proves the claim. `inline_vector`, `sparse_set`, and
+`sparse_map` each build, mutate, erase from and clone a container inside a
+`consteval` lambda; `spsc_ring` is pinned with a `constinit` global instead, that
+being as far as atomics allow. The non-trivial fallback is covered too: a
+`std::string` element takes the byte-array branch, which cannot constant-evaluate but
+must still move and clone correctly at run time.
+
 Two helper types carry most of the weight. A counting payload proves no leaks and
 no double destroys; a payload whose move throws once a budget runs out is what
 actually instantiates the rollback branch of `relocate_grow`, which every

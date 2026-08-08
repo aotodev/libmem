@@ -199,3 +199,70 @@ allocator already had in hand. `pool::emplace` uses this, so insertion stays
 O(N/64) amortised rather than paying an O(S) scan to recover a position it just
 discarded. Reach for `make_iterator(ptr)` only when you have a pointer and no
 allocation to go with it.
+
+## Constant evaluation
+
+`inline_vector` is usable in constant expressions:
+
+```cpp
+constexpr int folded = [] {
+    libmem::inline_vector<int, 8> v{};
+    v.push_back(10);
+    v.push_back(20);
+    v.erase(v.begin());
+    return v[0];
+}();
+static_assert(folded == 20);
+```
+
+`sparse_set` and `sparse_map` over inline storage work the same way, the whole way
+through insert, erase, clear and clone:
+
+```cpp
+constexpr std::size_t n = [] {
+    libmem::sparse_set<entity, libmem::inline_storage<entity, 32>> s{};
+    s.insert(entity{1});
+    s.insert(entity{2});
+    s.erase(entity{1});
+    return s.size();
+}();
+static_assert(n == 1);
+```
+
+`spsc_ring` stops one step short. `std::atomic` has a constexpr constructor but no
+constexpr `load` or `store`, so a ring can be *built* at compile time and not
+*used* there. What that buys is `constinit`, which is the part worth having for a
+queue that is usually a global: no dynamic initialiser, and so no exposure to the
+static-initialisation-order fiasco.
+
+```cpp
+constinit libmem::spsc_ring<command, 64> queue{};
+```
+
+All of this works for a `T` that is trivially default-constructible and trivially
+destructible. `inline_storage` then holds a real
+`T[N]` instead of a byte array, which is what makes it constexpr-usable, and P1331
+lets that array be left trivially default-initialised inside a `constexpr`
+constructor, so nothing is zeroed at runtime and `sizeof` is unchanged.
+`inline_storage<T, N>::constexpr_usable` reports which branch a `T` takes.
+
+Raw bytes are the obstacle, not a missing keyword: `reinterpret_cast` is forbidden
+during constant evaluation, so a byte array can never be viewed as a `T*`. The
+single-member-union trick that constexpr `std::vector` uses does not help either,
+because it only yields constexpr access by *index*: taking `&slots[0].value` and
+adding one gives a one-past-the-end pointer, and constructing through it is
+rejected. The `storage` concept hands out a `T*` that containers do arithmetic on,
+so a real array is the only representation that satisfies both.
+
+The other storage kinds are not constexpr-usable, for a different reason: they
+reach `::operator new` through their resource, and only `std::allocator<T>::allocate`
+is blessed for constant evaluation. So `vector`, `small_vector`, `fixed_vector`, and
+the heap-backed sparse containers carry `constexpr` on their members but can only
+ever be evaluated at run time.
+
+One portability note. libmem does not call `std::uninitialized_move_n`,
+`uninitialized_fill_n`, or `uninitialized_value_construct_n`, because libc++ has not
+yet made them `constexpr` (P2283) while libstdc++ has. Using them directly would
+make the inline containers constant-evaluable on GCC and not on Clang. The
+equivalents in `libmem::detail` do the same work through `std::construct_at`, which
+has been constexpr since C++20, and keep the same roll-back-on-throw guarantee.
