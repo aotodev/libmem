@@ -161,6 +161,14 @@ public:
         constexpr explicit operator bool() const noexcept { return erased; }
     };
 
+private:
+    /* Private type, public constructor: only members can spell the tag, while
+     * `std::optional::emplace` can still forward it. */
+    struct copy_of_t {
+        explicit copy_of_t() = default;
+    };
+
+public:
     /* ========================================================================
      * Construction / destruction
      * ======================================================================== */
@@ -168,6 +176,18 @@ public:
     sparse_set()
         requires std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
     = default;
+
+    /**
+     * @brief Build both arrays from `args` and insert every id of `source`.
+     *
+     * The body of `clone` and `try_clone`. Inserts what fits, so `try_clone` can
+     * compare sizes afterwards.
+     */
+    template <typename... Args>
+        requires std::constructible_from<SparseIndex, Args&...> && std::constructible_from<DenseStorage, Args&...>
+    sparse_set(copy_of_t, const sparse_set& source, Args&&... args) : sparse_{args...}, dense_{args...} {
+        static_cast<void>(insert_range(source));
+    }
 
     /**
      * @brief Construct both arrays from `args`, typically a resource.
@@ -203,9 +223,24 @@ public:
     sparse_set(const sparse_set&) = delete;
     sparse_set& operator=(const sparse_set&) = delete;
 
+    /** @brief Storage whose slots travel: both arrays come across as pointers. */
     sparse_set(sparse_set&& other) noexcept
         requires relocatable
         : sparse_{std::move(other.sparse_)}, dense_{std::move(other.dense_)}, size_{std::exchange(other.size_, 0)} {}
+
+    /**
+     * @brief Inline-backed set: the sparse index drains and the dense ids are relocated one at a time.
+     *
+     * @note Requires a non-throwing id move, which keeps every move `noexcept` and
+     *       leaves no half-moved state to unwind: the sparse index is drained in
+     *       the mem-initialiser, before the dense ids are touched.
+     */
+    sparse_set(sparse_set&& other) noexcept
+        requires(!relocatable) && std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage> &&
+                std::is_nothrow_move_constructible_v<Id>
+        : sparse_{std::move(other.sparse_)} {
+        adopt_dense(other);
+    }
 
     sparse_set& operator=(sparse_set&& other) noexcept
         requires relocatable
@@ -215,6 +250,17 @@ public:
             sparse_ = std::move(other.sparse_);
             dense_ = std::move(other.dense_);
             size_ = std::exchange(other.size_, 0);
+        }
+        return *this;
+    }
+
+    sparse_set& operator=(sparse_set&& other) noexcept
+        requires(!relocatable) && std::is_nothrow_move_constructible_v<Id>
+    {
+        if (this != &other) {
+            destroy_all();
+            sparse_ = std::move(other.sparse_);
+            adopt_dense(other);
         }
         return *this;
     }
@@ -395,6 +441,51 @@ public:
     }
 
     /* ========================================================================
+     * Copying: explicit, never implicit
+     * ======================================================================== */
+
+    /**
+     * @brief A deep copy, drawing on the same resource this set uses.
+     *
+     * The fixed-extent counterpart to `try_clone`: both sets have the same static
+     * extent, so every id fits and there is nothing to report.
+     */
+    sparse_set clone() const
+        requires fixed_extent_storage<DenseStorage> && std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
+    {
+        if constexpr (resourced_storage<DenseStorage>) {
+            return sparse_set{copy_of_t{}, *this, dense_.resource()};
+        } else {
+            return sparse_set{copy_of_t{}, *this};
+        }
+    }
+
+    /**
+     * @brief A deep copy, drawing on the same resource this set uses.
+     *
+     * Copying is never implicit: a copy constructor cannot report that the storage
+     * ran out, so it would have to throw.
+     *
+     * @return `std::nullopt` when the storage could not take every id.
+     */
+    std::optional<sparse_set> try_clone() const
+        requires std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
+    {
+        std::optional<sparse_set> copy{};
+
+        if constexpr (resourced_storage<DenseStorage>) {
+            copy.emplace(copy_of_t{}, *this, dense_.resource());
+        } else {
+            copy.emplace(copy_of_t{}, *this);
+        }
+
+        if (copy->size() != size_) {
+            return std::nullopt;
+        }
+        return copy;
+    }
+
+    /* ========================================================================
      * Observers
      * ======================================================================== */
 
@@ -427,6 +518,18 @@ private:
     void destroy_all() noexcept {
         std::destroy_n(dense_.data(), size_);
         size_ = 0;
+    }
+
+    /**
+     * @brief Relocate `other`'s dense ids into these slots and empty it.
+     * @pre This dense array holds no live ids, and `other.sparse_` has already been drained.
+     */
+    void adopt_dense(sparse_set& other) noexcept {
+        assert(other.size_ <= dense_.capacity() && "sparse_set: source does not fit the destination slots");
+
+        std::uninitialized_move_n(other.dense_.data(), other.size_, dense_.data());
+        size_ = std::exchange(other.size_, 0);
+        std::destroy_n(other.dense_.data(), size_);
     }
 };
 
@@ -498,6 +601,13 @@ public:
     static constexpr size_type static_capacity{key_set::static_capacity};
     static constexpr bool relocatable{key_set::relocatable && value_storage::relocatable};
 
+private:
+    /* Private type, public constructor; see `sparse_set::copy_of_t`. */
+    struct copy_of_t {
+        explicit copy_of_t() = default;
+    };
+
+public:
     /* ========================================================================
      * Construction / destruction
      * ======================================================================== */
@@ -505,6 +615,22 @@ public:
     sparse_map()
         requires std::default_initializable<key_set> && std::default_initializable<value_storage>
     = default;
+
+    /**
+     * @brief Build both arrays from `args` and emplace every entry of `source`.
+     *
+     * The body of `clone` and `try_clone`. Emplaces what fits, so `try_clone` can
+     * compare sizes afterwards.
+     */
+    template <typename... Args>
+        requires std::constructible_from<key_set, Args&...> && std::constructible_from<value_storage, Args&...> && std::copy_constructible<T>
+    sparse_map(copy_of_t, const sparse_map& source, Args&&... args) : keys_{args...}, values_{args...} {
+        for (const auto& [id, value] : source) {
+            if (!emplace(id, value).first) {
+                break;
+            }
+        }
+    }
 
     /**
      * @brief Construct the key set and the payload array from `args`, typically a resource.
@@ -531,9 +657,25 @@ public:
     sparse_map(const sparse_map&) = delete;
     sparse_map& operator=(const sparse_map&) = delete;
 
+    /** @brief Storage whose slots travel: both arrays come across as pointers. */
     sparse_map(sparse_map&& other) noexcept
         requires relocatable
         : keys_{std::move(other.keys_)}, values_{std::move(other.values_)} {}
+
+    /**
+     * @brief Inline-backed map: the payloads are relocated one at a time.
+     *
+     * @note Requires a non-throwing payload move, so the move stays `noexcept` and
+     *       leaves no half-moved state. The payloads are relocated *before* the key
+     *       set is moved, so `other.size()` still describes them while they travel.
+     */
+    sparse_map(sparse_map&& other) noexcept
+        requires(!relocatable) && std::default_initializable<key_set> && std::default_initializable<value_storage> && std::is_nothrow_move_constructible_v<T> &&
+                std::movable<key_set>
+    {
+        adopt_values(other);
+        keys_ = std::move(other.keys_);
+    }
 
     sparse_map& operator=(sparse_map&& other) noexcept
         requires relocatable
@@ -542,6 +684,17 @@ public:
             clear();
             keys_ = std::move(other.keys_);
             values_ = std::move(other.values_);
+        }
+        return *this;
+    }
+
+    sparse_map& operator=(sparse_map&& other) noexcept
+        requires(!relocatable) && std::is_nothrow_move_constructible_v<T> && std::movable<key_set>
+    {
+        if (this != &other) {
+            clear();
+            adopt_values(other);
+            keys_ = std::move(other.keys_);
         }
         return *this;
     }
@@ -739,9 +892,65 @@ public:
         keys_.clear();
     }
 
+    /* ========================================================================
+     * Copying: explicit, never implicit
+     * ======================================================================== */
+
+    /**
+     * @brief A deep copy, drawing on the same resource this map uses.
+     *
+     * The fixed-extent counterpart to `try_clone`: both maps have the same static
+     * extent, so every entry fits and there is nothing to report.
+     */
+    sparse_map clone() const
+        requires fixed_extent_storage<DenseStorage> && std::default_initializable<key_set> && std::default_initializable<value_storage> &&
+                 std::copy_constructible<T>
+    {
+        if constexpr (resourced_storage<value_storage>) {
+            return sparse_map{copy_of_t{}, *this, values_.resource()};
+        } else {
+            return sparse_map{copy_of_t{}, *this};
+        }
+    }
+
+    /**
+     * @brief A deep copy, drawing on the same resource this map uses.
+     *
+     * @return `std::nullopt` when the storage could not take every entry.
+     * @throws Whatever `T`'s copy constructor throws.
+     */
+    std::optional<sparse_map> try_clone() const
+        requires std::default_initializable<key_set> && std::default_initializable<value_storage> && std::copy_constructible<T>
+    {
+        std::optional<sparse_map> copy{};
+
+        if constexpr (resourced_storage<value_storage>) {
+            copy.emplace(copy_of_t{}, *this, values_.resource());
+        } else {
+            copy.emplace(copy_of_t{}, *this);
+        }
+
+        if (copy->size() != size()) {
+            return std::nullopt;
+        }
+        return copy;
+    }
+
 private:
     key_set keys_;
     value_storage values_;
+
+    /**
+     * @brief Relocate `other`'s payloads into these slots and destroy the originals.
+     * @pre These payload slots hold nothing live, and `other.keys_` has not been moved yet.
+     */
+    void adopt_values(sparse_map& other) noexcept {
+        const size_type count{other.keys_.size()};
+        assert(count <= values_.capacity() && "sparse_map: source does not fit the destination slots");
+
+        std::uninitialized_move_n(other.values_.data(), count, values_.data());
+        std::destroy_n(other.values_.data(), count);
+    }
 };
 
 /* ============================================================================
@@ -778,9 +987,11 @@ static_assert(std::contiguous_iterator<dynamic_set::iterator>);
 static_assert(dynamic_set::growable && dynamic_set::relocatable);
 static_assert(std::movable<dynamic_set>);
 
-/* A fixed inline extent neither grows nor moves: its slots are the object. */
+/* A fixed inline extent does not grow, and its move relocates the ids rather than
+ * transferring a buffer, but it does move. */
 static_assert(!inline_set::growable && !inline_set::relocatable);
-static_assert(!std::movable<inline_set>);
+static_assert(std::movable<inline_set>);
+static_assert(std::is_nothrow_move_constructible_v<inline_set>);
 static_assert(inline_set::static_capacity == 64);
 
 static_assert(std::ranges::contiguous_range<sparse_map<sparse_test_id, int>::key_set>);
@@ -815,12 +1026,30 @@ static_assert(std::ranges::random_access_range<paged_map>);
 static_assert(std::movable<paged_map>);
 static_assert(std::constructible_from<paged_set, std::from_range_t, std::span<const sparse_test_id>>);
 
-/* A small-buffer set grows but does not move: small_storage is not relocatable. */
+/* A small-buffer set grows, and moves by relocating rather than transferring. */
 using small_set = sparse_set<sparse_test_id, small_storage<sparse_test_id, 32>>;
 
 static_assert(small_set::growable);
 static_assert(!small_set::relocatable);
-static_assert(!std::movable<small_set>);
+static_assert(std::movable<small_set>);
+
+/* Copying is never implicit; a deep copy goes through clone / try_clone. */
+static_assert(!std::copyable<dynamic_set>);
+static_assert(!std::copyable<inline_set>);
+
+template <typename S>
+concept has_clone = requires(const S& s) { s.clone(); };
+
+template <typename S>
+concept has_try_clone = requires(const S& s) { s.try_clone(); };
+
+/* clone only where the copy cannot report a failure; try_clone everywhere. */
+static_assert(has_clone<inline_set>);
+static_assert(!has_clone<dynamic_set>);
+static_assert(!has_clone<small_set>);
+static_assert(has_try_clone<dynamic_set> && has_try_clone<inline_set> && has_try_clone<paged_set>);
+static_assert(has_try_clone<dynamic_map> && has_try_clone<paged_map>);
+static_assert(std::same_as<decltype(std::declval<const dynamic_set&>().try_clone()), std::optional<dynamic_set>>);
 
 } // namespace detail
 

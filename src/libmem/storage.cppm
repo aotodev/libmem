@@ -134,6 +134,23 @@ export template <typename S>
 concept fixed_extent_storage = storage<S> && (S::static_capacity != dynamic_extent);
 
 /**
+ * @brief A `storage` that exposes the resource its slots came from, and can be rebuilt against it.
+ *
+ * What lets a container clone itself into the same resource rather than a
+ * default-constructed one.
+ *
+ * @warning A storage that should model this but does not fails quietly: the clone
+ *          gets a default-constructed resource, and a `resource_ref` one is then
+ *          null, so the first allocation asserts at some later call site rather
+ *          than at the clone.
+ */
+export template <typename S>
+concept resourced_storage = storage<S> && requires(S& s) {
+    { s.resource() };
+    requires std::constructible_from<S, decltype(s.resource())>;
+};
+
+/**
  * @brief A `growable_storage` that can hand its off-object block over to another instance of itself.
  *
  * The run-time counterpart to `relocatable`, for a storage whose slots are only
@@ -663,6 +680,16 @@ static_assert(storage_for<dynamic_storage<int>, int>);
 static_assert(!fixed_extent_storage<dynamic_storage<int>>);
 static_assert(growable_storage<dynamic_storage<int>>);
 static_assert(!transferable_storage<dynamic_storage<int>>);
+
+/* Only the resource-backed kinds can be rebuilt against their resource. An
+ * inline one has none, and a clone of it needs none. */
+static_assert(!resourced_storage<inline_storage<int, 8>>);
+static_assert(resourced_storage<fixed_storage<int, 8>>);
+static_assert(resourced_storage<dynamic_storage<int>>);
+static_assert(resourced_storage<small_storage<int, 8>>);
+/* The case that fails quietly if the concept is wrong: an injected reference must
+ * reach the clone, or it allocates through a null referent. */
+static_assert(resourced_storage<dynamic_storage<int, resource_ref<default_resource>>>);
 
 static_assert(storage_for<small_storage<int, 8>, int>);
 static_assert(!fixed_extent_storage<small_storage<int, 8>>);

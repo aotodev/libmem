@@ -110,9 +110,25 @@ public:
     flat_sparse_index(const flat_sparse_index&) = delete;
     flat_sparse_index& operator=(const flat_sparse_index&) = delete;
 
+    /** @brief Storage whose slots travel: the whole array comes across. */
     flat_sparse_index(flat_sparse_index&& other) noexcept
         requires relocatable
         : slots_{std::move(other.slots_)} {}
+
+    /**
+     * @brief Inline-backed index: the subscripts are copied across and the source is tombstoned.
+     *
+     * @warning Tombstoning the source is not tidiness. The owning container empties
+     *          its dense array on a move, so a source left holding live subscripts
+     *          would report `contains(id) == true` at `size() == 0`, and the stale
+     *          position would index past the end.
+     */
+    flat_sparse_index(flat_sparse_index&& other) noexcept
+        requires(!relocatable) && std::default_initializable<Storage>
+    {
+        fill_from(0);
+        drain(other);
+    }
 
     flat_sparse_index& operator=(flat_sparse_index&& other) noexcept
         requires relocatable
@@ -120,6 +136,16 @@ public:
         if (this != &other) {
             release();
             slots_ = std::move(other.slots_);
+        }
+        return *this;
+    }
+
+    flat_sparse_index& operator=(flat_sparse_index&& other) noexcept
+        requires(!relocatable)
+    {
+        if (this != &other) {
+            std::fill_n(slots_.data(), slots_.capacity(), npos);
+            drain(other);
         }
         return *this;
     }
@@ -179,6 +205,23 @@ private:
     }
 
     void release() noexcept { std::destroy_n(slots_.data(), slots_.capacity()); }
+
+    /**
+     * @brief Copy `other`'s subscripts into these slots and tombstone every one of its own.
+     * @pre These slots are all tombstoned.
+     */
+    void drain(flat_sparse_index& other) noexcept {
+        size_type* mine{slots_.data()};
+        size_type* theirs{other.slots_.data()};
+        const size_type covered_here{slots_.capacity()};
+
+        for (size_type i{}; i < other.slots_.capacity(); ++i) {
+            if (i < covered_here) {
+                mine[i] = theirs[i];
+            }
+            theirs[i] = npos;
+        }
+    }
 };
 
 /* ============================================================================

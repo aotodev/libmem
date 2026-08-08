@@ -6,6 +6,7 @@
  *
  *   - **Concepts & policies**: `memory_resource`, `aligned_memory_resource`, `shrink_policy`.
  *   - **Resources**: `default_resource`, `resource_ref`, `allocator_resource`, `threshold_policy`.
+ *   - **Interop**: `resource_allocator`, a standard Allocator over any libmem resource.
  *   - **Identifiers**: `regular_indexable_id`, `null_id_v`, `to_index`.
  *   - **Storage**: `inline_storage`, `fixed_storage`, `dynamic_storage`, `small_storage`, `relocate_grow`.
  *   - **Sparse index**: `flat_sparse_index`, `paged_sparse_index`.
@@ -22,6 +23,7 @@ export import :multislab;
 export import :arena;
 export import :typed_arena;
 export import :pool;
+export import :allocator;
 export import :spsc_ring;
 export import :vector;
 export import :sparse_index;

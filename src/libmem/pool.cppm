@@ -60,6 +60,34 @@ template <typename T> consteval std::uint32_t default_pool_blocks_per_slab() noe
 } // namespace detail
 
 /* ============================================================================
+ * Constructor knobs
+ * ============================================================================ */
+
+/**
+ * @brief Cap on the number of slab pages a `pool` may hold; 0 means unlimited.
+ *
+ * A named type rather than a bare `std::uint32_t` because `pool` also has an
+ * `initializer_list` constructor: `pool<int> p{4}` is a pool holding the element
+ * 4, and a bare-integer overload would make that spelling silently mean "cap of 4"
+ * or "one element" depending on the element type.
+ *
+ * @code
+ *     libmem::pool<int> capped{libmem::slab_limit{4}};  // configuration
+ *     libmem::pool<int> holding{4};                     // one element, value 4
+ * @endcode
+ */
+export struct slab_limit {
+    std::uint32_t value{};
+
+    /* Non-explicit and integral-taking, so `slab_limit{4}` needs no `u` suffix. */
+    constexpr slab_limit() noexcept = default;
+
+    template <std::integral N> constexpr slab_limit(const N count) noexcept : value{static_cast<std::uint32_t>(count)} {} // NOLINT(google-explicit-constructor)
+
+    constexpr bool operator==(const slab_limit&) const noexcept = default;
+};
+
+/* ============================================================================
  * pool: auto-expanding, pointer-stable typed container
  * ============================================================================ */
 
@@ -184,22 +212,30 @@ public:
     constexpr explicit pool(Policy policy) noexcept : pool_{std::move(policy)} {}
 
     /** @brief Construct with a hard cap on the number of slab pages (0 = unlimited). */
-    constexpr explicit pool(const std::uint32_t max_slabs) noexcept : pool_{max_slabs} {}
+    constexpr explicit pool(const slab_limit cap) noexcept : pool_{cap.value} {}
 
-    /** @brief Construct from an arbitrary input range of values. */
+    /** @brief Construct with a slab cap, a resource, and a policy; the full allocator configuration. */
+    constexpr pool(const slab_limit cap, Resource resource, Policy policy) noexcept : pool_{cap.value, std::move(resource), std::move(policy)} {}
+
+    /**
+     * @brief Construct from an arbitrary input range of values.
+     * @note Inserts what fits. A resource that runs out leaves the tail of `r`
+     *       behind rather than reporting; use `insert_range` when the count matters.
+     */
     template <std::ranges::input_range R>
         requires std::constructible_from<T, std::ranges::range_reference_t<R>> && (!std::same_as<std::remove_cvref_t<R>, pool>)
     explicit pool(R&& r) {
-        insert_range(std::forward<R>(r));
+        static_cast<void>(insert_range(std::forward<R>(r)));
     }
 
-    /** @brief Construct from an initializer list. */
+    /**
+     * @brief Construct from an initializer list.
+     * @note Inserts what fits; see the range constructor.
+     */
     pool(std::initializer_list<T> il)
         requires std::copy_constructible<T>
     {
-        for (const auto& v : il) {
-            emplace(v);
-        }
+        static_cast<void>(insert_range(il));
     }
 
     pool(const pool&) = delete;
@@ -237,6 +273,9 @@ public:
     /** @brief Number of currently empty (retained) slab pages. */
     constexpr std::uint32_t empty_slab_count() const noexcept { return pool_.empty_slab_count(); }
 
+    /** @brief Hard cap on slab pages, or 0 when unlimited. */
+    constexpr std::uint32_t max_slabs() const noexcept { return pool_.max_slabs(); }
+
     /* ========================================================================
      * Iteration: deducing-this share between const / non-const overloads
      * ======================================================================== */
@@ -266,7 +305,11 @@ public:
 
     /**
      * @brief Construct a new element in place.
-     * @return Iterator to the newly constructed element.
+     *
+     * @return Iterator to the new element, or one equal to `end()` when the
+     *         backing resource could not supply a block.
+     * @throws Whatever `T`'s constructor throws, having first released the block,
+     *         so a failed construction leaks nothing.
      *
      * Existing iterators and pointers to other elements remain valid.
      */
@@ -277,9 +320,21 @@ public:
          * block, so insertion stays O(1); allocate() + make_iterator() would
          * pay an O(S) find_owner scan over the slab list on every insert. */
         const auto alloc{pool_.allocate_at()};
-        assert(alloc.ptr != nullptr && "pool: backing resource exhausted");
+        if (!alloc.ptr) [[unlikely]] {
+            return iterator{};
+        }
 
-        ::new (alloc.ptr) T(std::forward<Args>(args)...);
+        if constexpr (std::is_nothrow_constructible_v<T, Args...>) {
+            ::new (alloc.ptr) T(std::forward<Args>(args)...);
+        } else {
+            try {
+                ::new (alloc.ptr) T(std::forward<Args>(args)...);
+            } catch (...) {
+                pool_.deallocate(alloc.ptr);
+                throw;
+            }
+        }
+
         ++size_;
         return iterator{alloc.it};
     }
@@ -299,15 +354,17 @@ public:
     }
 
     /**
-     * @brief Insert every element of `r`, one at a time.
-     * @return Number of elements inserted.
+     * @brief Insert every element of `r`, one at a time, stopping if the resource runs out.
+     * @return Number of elements inserted, short of the range's length when it did.
      */
     template <std::ranges::input_range R>
         requires std::constructible_from<T, std::ranges::range_reference_t<R>>
     size_type insert_range(R&& r) {
         size_type n{};
         for (auto&& e : r) {
-            emplace(std::forward<decltype(e)>(e));
+            if (emplace(std::forward<decltype(e)>(e)) == end()) {
+                break;
+            }
             ++n;
         }
         return n;
@@ -351,6 +408,32 @@ public:
         }
         pool_.destroy();
         size_ = 0;
+    }
+
+    /* ========================================================================
+     * Copying: explicit, never implicit
+     * ======================================================================== */
+
+    /**
+     * @brief A deep copy, rebuilding the same allocator configuration (cap, resource, policy).
+     *
+     * @return `std::nullopt` when the resource could not supply a block for every
+     *         element, or when the slab cap was reached.
+     * @throws Whatever `T`'s copy constructor throws.
+     *
+     * @warning The clone holds equal elements, not the same layout. Slots are handed
+     *          out by the allocator, so a clone of a pool with erased holes is packed
+     *          differently and may iterate in a different order.
+     */
+    std::optional<pool> try_clone() const
+        requires std::copy_constructible<T>
+    {
+        std::optional<pool> copy{std::in_place, slab_limit{pool_.max_slabs()}, pool_.resource(), pool_.policy()};
+
+        if (copy->insert_range(*this) != size_) {
+            return std::nullopt;
+        }
+        return copy;
     }
 
     /* ========================================================================
