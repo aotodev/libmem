@@ -34,11 +34,61 @@ Two members beyond the usual surface:
 There is deliberately no mid-sequence `insert` and no `shrink_to_fit`. Unspilling a
 `small_storage` would need a shrink step in the block protocol first.
 
-A vector moves when its storage is `relocatable` (a pointer steal) or
-`transferable_storage` (`small_storage`, via `adopt_from`). `inline_vector` is
-neither and does not move, exactly as `spsc_ring` and `sparse_set` over inline
-storage do not. `small_vector` additionally needs a default-constructible resource,
-since the destination storage has to exist before it can adopt anything.
+## Copying and moving
+
+One rule across every container: **never implicitly copyable, always movable.**
+
+Copying is deleted because a copy constructor cannot report that the resource ran
+out. It would have to throw `std::bad_alloc`, which is the one thing the rest of
+the library avoids. Rust hits the same wall from the other side: `Clone::clone`
+returns `Self`, so it cannot express failure either, and Rust's answer is to abort
+on allocation failure and offer `try_reserve` for code that must cope. libmem is
+already the `try_*` dialect throughout, so it reports instead of aborting.
+
+| Operation | Where | Returns |
+|-----------|-------|---------|
+| `clone()` | fixed extent, where the copy always fits | the container |
+| `try_clone()` | anywhere | `std::optional<container>`, empty when the storage ran out |
+| `assign_range(r)` | `basic_vector` | how many elements were taken |
+
+A clone is deep, and draws on **the same resource** the source uses rather than a
+default-constructed one, which is what `resourced_storage` exists to guarantee. A
+`small_vector` clone that fits inline allocates nothing.
+
+```cpp
+libmem::inline_vector<int, 8> b{a.clone()};              // cannot fail
+if (auto c = heap_vec.try_clone()) { use(*c); }          // can, and says so
+existing.assign_range(source);                           // clone into what you have
+```
+
+`pool` reports too: `emplace` returns an iterator equal to `end()` when the
+resource could not supply a block, and `insert_range` returns how many actually
+went in. Its `try_clone` rebuilds the whole allocator configuration (slab cap,
+resource, policy), but holds equal elements rather than the same layout, so it may
+iterate in a different order.
+
+`pool` takes its slab cap as a named `slab_limit`, not a bare integer, because it
+also has an `initializer_list` constructor:
+
+```cpp
+libmem::pool<int> capped{libmem::slab_limit{4}};   // configuration
+libmem::pool<int> holding{4};                      // one element, value 4
+```
+
+A bare-integer overload would make `pool<int>{4}` mean one thing for `int` and
+another for a non-integral element type, and silently drop a cap the caller thought
+they had set. `std::vector<int>{4}` sets the same trap; the difference is that
+`vector`'s wrong branch is visible in `size()`, while a dropped slab cap only shows
+up much later as growth that was supposed to be bounded.
+
+Every container moves, inline-backed ones included, and every move is `noexcept`.
+Where the storage cannot transfer its slots the move relocates the elements and
+empties the source, exactly as `std::array` does. That costs O(size) rather than
+O(1), which is what the container-level `relocatable` constant now reports: a cost,
+not an availability. Non-movable containers were a standing tax on generic code,
+so the only non-movable thing left is `spsc_ring`, deliberately, since a
+synchronization primitive with two threads pointing into it should not move any
+more than a `std::mutex` should.
 
 ## Identifiers
 

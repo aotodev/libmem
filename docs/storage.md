@@ -42,6 +42,8 @@ argument, as `std::allocator_traits::rebind_alloc` does for allocators.
   `aligned_memory_resource`: the Allocator interface cannot express a runtime
   alignment, so over-aligned storage refuses to instantiate against it rather than
   quietly under-aligning.
+- `resource_allocator<T, R>` is the mirror image, and the one to reach for when the
+  container is theirs rather than ours. See [interop](#standard-container-interop).
 - Over-aligned storage needs an `aligned_memory_resource` (`allocate(size, align)`
   plus the matching sized `deallocate`).
 
@@ -109,10 +111,57 @@ built on different arenas: a block is never released through a resource that did
 not supply it, and a destination that fell back to the element-wise path still
 allocates from wherever its source did.
 
-The upshot is that `sparse_set` and `sparse_map` over `small_storage` correctly
-refuse to move, since they only ever move by moving their storage, while
-`basic_vector` opts into the runtime path and `small_vector` stays movable.
+Containers use `adopt_from` where it exists and fall back to relocating their
+elements where it does not, so every one of them moves regardless of what its
+storage can do. See [containers.md](containers.md#copying-and-moving).
+
+A third concept, `resourced_storage`, says a storage exposes the resource its slots
+came from and can be rebuilt against it. That is what lets a container clone itself
+into the same arena instead of a default-constructed resource. Getting it wrong is
+quiet rather than loud: the clone would hold a null `resource_ref` and assert at its
+first allocation, far from the call that made the mistake.
 
 One `sizeof` surprise worth knowing: `rebind<U>` keeps `N` as a slot count, not a
 byte budget. A `sparse_set<entity, small_storage<entity, 64>>` gets 64 inline dense
 slots **and** 64 inline `size_type` sparse slots.
+
+## Standard container interop
+
+The two adapters are mirrors of each other, and the names are easy to swap by
+accident:
+
+| Adapter | Direction | Use when |
+|---------|-----------|----------|
+| `allocator_resource<Alloc>` | Allocator -> resource | a `std::allocator` should back a libmem container |
+| `resource_allocator<T, R>` | resource -> Allocator | a libmem `arena` should back a `std::vector` |
+
+```cpp
+libmem::arena scratch{1 << 20};
+using alloc = libmem::resource_allocator<int, libmem::resource_ref<libmem::arena>>;
+
+std::vector<int, alloc> v{alloc{libmem::resource_ref{scratch}}};
+std::list<int, alloc>   l{alloc{libmem::resource_ref{scratch}}};   // rebinds to its node type
+```
+
+`resource_allocator` is the **one place in libmem where allocation failure is
+reported by throwing**. `Allocator::allocate` is required to return valid memory or
+throw, so a null return is not expressible; the adapter raises `std::bad_alloc`, and
+`std::bad_array_new_length` when the element count would overflow. Everything on the
+libmem side of the boundary still reports by value. Rust puts its own OOM handling in
+the same place, at the allocator boundary, and for the same reason.
+
+Two things to know:
+
+**A stateful resource must go through `resource_ref`.** Standard containers copy
+their allocator freely, and how often is unspecified, so a resource held by value is
+copied with it and every copy gets private state. The implementations really do
+differ: a by-value budget of one serves a thousand `std::vector` reallocations under
+libc++ and runs out under libstdc++. A stateless resource such as `default_resource`
+is unaffected, which is why it is the default.
+
+**All three `propagate_on_container_*` traits are `true_type`,** so a container
+carries the source's allocator across copy-assign, move-assign, and swap. That is
+what keeps those operations defined when two allocators reference different arenas;
+swapping containers with unequal non-propagating allocators is undefined behaviour.
+Equality follows the resource where the resource is comparable, and answers `true`
+for a stateless one, since an empty type has no state to differ on.

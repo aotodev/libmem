@@ -31,6 +31,21 @@ The O(S) terms are all `find_owner`, a linear scan over slab pages. See
 `small_vector` adds nothing to any of these. It just does not allocate at all until
 it outgrows its inline slots.
 
+## Copying and moving
+
+| Operation | Cost |
+|-----------|------|
+| move, `relocatable` storage | O(1), a pointer steal |
+| move, otherwise | O(size) element relocations, no allocation |
+| `basic_vector::clone` / `try_clone` | O(size) copies, one allocation when growable |
+| `sparse_set` / `sparse_map` clone | O(size) copies, one allocation per array |
+| `pool::try_clone` | O(size) inserts, one slab page per `BlocksPerSlab` elements |
+
+A clone is never cheaper than the container it copies, which is why it is spelled
+out rather than reachable by an implicit copy. `pool::try_clone` is the one that
+also rearranges: slots come from the allocator, so a clone of a pool with erased
+holes is packed differently and may iterate in a different order.
+
 ## Index-addressed containers
 
 | Operation | `sparse_set` / `sparse_map` |

@@ -51,6 +51,18 @@ returning `nullptr`, and the containers pass that through: `push_back` returns a
 `T*`, `reserve` returns `bool`, `insert` returns a result you can test. Nothing
 here throws `std::bad_alloc` at you.
 
+**No hidden deep copies.** No container is implicitly copyable, because a copy
+constructor has no way to report that the resource ran out. Copying is explicit and
+fallible instead, the way Rust makes it explicit and infallible:
+
+```cpp
+libmem::inline_vector<int, 8> b{a.clone()};              // fixed extent, cannot fail
+if (auto c = heap_vec.try_clone()) { use(*c); }          // can fail, and says so
+```
+
+Everything moves, though, inline buffers included, and every move is `noexcept`.
+A non-movable container is a standing tax on generic code.
+
 **Growth cannot corrupt a container.** Allocating a new block, relocating into it,
 and committing to it are three separate steps, so a failed growth (or a throwing
 move constructor halfway through) leaves the container exactly as it was.
@@ -58,6 +70,10 @@ move constructor halfway through) leaves the container exactly as it was.
 **Over-alignment is checked, not assumed.** A resource that cannot express an
 alignment will not compile against an over-aligned request rather than silently
 under-aligning.
+
+**It interoperates both ways.** A `std::pmr::polymorphic_allocator` can back a
+libmem container, and `resource_allocator` turns any libmem resource into a standard
+Allocator, so an `arena` can back a `std::vector`, `std::list`, or `std::map`.
 
 Intended for the places a general-purpose allocator is the wrong shape: an ECS
 storing components by entity id, a frame arena reset every tick, a lock-free
