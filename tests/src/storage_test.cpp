@@ -171,14 +171,28 @@ TEST(StorageConcepts, ExtentAndGrowthAreVisibleInTheType) {
     static_assert(libmem::fixed_storage<int, 4>::static_capacity == 4);
     static_assert(libmem::dynamic_storage<int>::static_capacity == libmem::dynamic_extent);
 
+    static_assert(libmem::storage_for<libmem::small_storage<int, 4>, int>);
+    static_assert(libmem::small_storage<int, 4>::static_capacity == libmem::dynamic_extent);
+
     static_assert(!libmem::growable_storage<libmem::inline_storage<int, 4>>);
     static_assert(!libmem::growable_storage<libmem::fixed_storage<int, 4>>);
     static_assert(libmem::growable_storage<libmem::dynamic_storage<int>>);
+    static_assert(libmem::growable_storage<libmem::small_storage<int, 4>>);
 
-    /* Only the heap-backed kinds transfer their slots on a move. */
+    /* Only the heap-backed kinds transfer their slots on a move. small_storage's
+     * slots are the object until it spills, so its answer has to be false and the
+     * run-time question goes through adopt_from instead. */
     static_assert(!libmem::inline_storage<int, 4>::relocatable);
     static_assert(libmem::fixed_storage<int, 4>::relocatable);
     static_assert(libmem::dynamic_storage<int>::relocatable);
+    static_assert(!libmem::small_storage<int, 4>::relocatable);
+
+    static_assert(!libmem::transferable_storage<libmem::dynamic_storage<int>>);
+    static_assert(libmem::transferable_storage<libmem::small_storage<int, 4>>);
+
+    /* A fixed extent cannot be a small buffer: there is nothing to spill into. */
+    static_assert(!libmem::fixed_extent_storage<libmem::small_storage<int, 4>>);
+    static_assert(libmem::small_storage<int, 4>::inline_capacity == 4);
 }
 
 TEST(StorageConcepts, RebindKeepsTheResourceAndResetsTheAlignment) {
@@ -329,6 +343,175 @@ TEST(DynamicStorage, GrowthIsGeometric) {
     ASSERT_TRUE(libmem::relocate_grow(store, first + 1, 0));
 
     EXPECT_GE(store.capacity(), 2 * first);
+}
+
+/* ============================================================================
+ * small_storage
+ * ============================================================================ */
+
+TEST(SmallStorage, StartsInlineAndAllocatesNothing) {
+    auditing_resource audit{};
+    libmem::small_storage<std::uint32_t, 8, libmem::resource_ref<auditing_resource>> store{libmem::resource_ref{audit}};
+
+    EXPECT_EQ(store.capacity(), 8u);
+    EXPECT_FALSE(store.spilled());
+    EXPECT_EQ(audit.allocations(), 0u) << "the small-buffer case must not touch the resource";
+    EXPECT_GE(sizeof(store), 8u * sizeof(std::uint32_t));
+
+    /* The slots are the object's own bytes until the first spill. */
+    const auto* base{reinterpret_cast<const std::byte*>(&store)};
+    const auto* slots{reinterpret_cast<const std::byte*>(store.data())};
+    EXPECT_GE(slots, base);
+    EXPECT_LT(slots, base + sizeof(store));
+}
+
+TEST(SmallStorage, SpillsToTheResourceOnceOutgrown) {
+    auditing_resource audit{};
+    {
+        libmem::small_storage<int, 4, libmem::resource_ref<auditing_resource>> store{libmem::resource_ref{audit}};
+
+        for (std::size_t i{}; i < 4; ++i) {
+            std::construct_at(store.data() + i, static_cast<int>(i));
+        }
+        ASSERT_EQ(audit.allocations(), 0u);
+
+        ASSERT_TRUE(libmem::relocate_grow(store, 5, 4));
+
+        EXPECT_TRUE(store.spilled());
+        EXPECT_GE(store.capacity(), 5u);
+        EXPECT_EQ(audit.allocations(), 1u);
+
+        const auto* base{reinterpret_cast<const std::byte*>(&store)};
+        const auto* slots{reinterpret_cast<const std::byte*>(store.data())};
+        EXPECT_TRUE(slots < base || slots >= base + sizeof(store)) << "spilled slots must be off-object";
+
+        for (std::size_t i{}; i < 4; ++i) {
+            EXPECT_EQ(store.data()[i], static_cast<int>(i)) << "element " << i;
+        }
+        std::destroy_n(store.data(), 4);
+    }
+    EXPECT_EQ(audit.outstanding(), 0u);
+    EXPECT_EQ(audit.mismatches(), 0);
+}
+
+TEST(SmallStorage, RegrowsFromASpilledBlockWithoutLeaking) {
+    auditing_resource audit{};
+    {
+        libmem::small_storage<std::uint64_t, 4, libmem::resource_ref<auditing_resource>> store{libmem::resource_ref{audit}};
+
+        for (std::size_t n{5}; n <= 500; n *= 4) {
+            ASSERT_TRUE(libmem::relocate_grow(store, n, 0));
+            EXPECT_TRUE(store.spilled());
+        }
+        EXPECT_GT(audit.allocations(), 1u) << "the test needs to have actually re-grown";
+        EXPECT_EQ(audit.outstanding(), 1u) << "one live block, the previous ones released";
+    }
+    EXPECT_EQ(audit.outstanding(), 0u);
+    EXPECT_EQ(audit.mismatches(), 0) << "a spilled block must go back with the size it came with";
+}
+
+TEST(SmallStorage, MovesLiveElementsOutOfTheInlineSlotsOnSpill) {
+    tracked::reset();
+    {
+        libmem::small_storage<tracked, 2> store{};
+
+        std::construct_at(store.data() + 0, 10);
+        std::construct_at(store.data() + 1, 20);
+        ASSERT_EQ(tracked::live, 2);
+
+        ASSERT_TRUE(libmem::relocate_grow(store, 3, 2));
+
+        EXPECT_TRUE(store.spilled());
+        EXPECT_EQ(tracked::live, 2) << "one live element per slot, no leaks and no double destroy";
+        EXPECT_EQ(tracked::moves, 2);
+        EXPECT_EQ(store.data()[0].value, 10);
+        EXPECT_EQ(store.data()[1].value, 20);
+
+        std::destroy_n(store.data(), 2);
+    }
+    EXPECT_EQ(tracked::live, 0);
+}
+
+TEST(SmallStorage, AFailedSpillLeavesTheInlineSlotsInPlace) {
+    libmem::small_storage<int, 4, limited_resource> store{limited_resource{0}};
+
+    int* slots{store.data()};
+    std::construct_at(slots, 7);
+
+    EXPECT_FALSE(libmem::relocate_grow(store, 8, 1)) << "budget spent";
+    EXPECT_EQ(store.data(), slots) << "a failed growth must change nothing";
+    EXPECT_EQ(store.capacity(), 4u);
+    EXPECT_FALSE(store.spilled());
+    EXPECT_EQ(*slots, 7);
+
+    std::destroy_at(slots);
+}
+
+TEST(SmallStorage, AdoptFromTakesASpilledBlockAndItsResource) {
+    auditing_resource audit{};
+    {
+        using store_type = libmem::small_storage<int, 4, libmem::resource_ref<auditing_resource>>;
+
+        store_type from{libmem::resource_ref{audit}};
+        ASSERT_TRUE(libmem::relocate_grow(from, 8, 0));
+        ASSERT_TRUE(from.spilled());
+
+        int* slots{from.data()};
+        const std::size_t capacity{from.capacity()};
+        std::construct_at(slots, 42);
+
+        store_type to{};
+        ASSERT_EQ(to.resource().get(), nullptr);
+
+        EXPECT_TRUE(to.adopt_from(from));
+
+        EXPECT_EQ(to.data(), slots) << "the block itself came across, no element was moved";
+        EXPECT_EQ(to.capacity(), capacity);
+        EXPECT_TRUE(to.spilled());
+        EXPECT_EQ(to.resource().get(), &audit) << "the resource travels with the block, so it is released through the one that supplied it";
+        EXPECT_EQ(*slots, 42);
+
+        EXPECT_FALSE(from.spilled()) << "the source falls back to its inline slots";
+        EXPECT_EQ(from.capacity(), 4u);
+        EXPECT_EQ(audit.allocations(), 1u) << "a transfer allocates nothing";
+
+        std::destroy_at(slots);
+    }
+    EXPECT_EQ(audit.outstanding(), 0u);
+    EXPECT_EQ(audit.mismatches(), 0);
+}
+
+TEST(SmallStorage, AdoptFromReportsFalseWhenTheSourceIsStillInline) {
+    auditing_resource audit{};
+    using store_type = libmem::small_storage<int, 4, libmem::resource_ref<auditing_resource>>;
+
+    store_type from{libmem::resource_ref{audit}};
+    store_type to{};
+
+    EXPECT_FALSE(to.adopt_from(from)) << "nothing to steal, the caller has to move the elements";
+    EXPECT_EQ(to.resource().get(), &audit) << "the resource comes over either way, so a later spill lands in the right place";
+    EXPECT_EQ(to.capacity(), 4u);
+    EXPECT_FALSE(to.spilled());
+    EXPECT_EQ(audit.allocations(), 0u);
+}
+
+TEST(SmallStorage, AdoptFromReleasesTheDestinationsOwnBlock) {
+    auditing_resource audit{};
+    {
+        using store_type = libmem::small_storage<int, 4, libmem::resource_ref<auditing_resource>>;
+
+        store_type from{libmem::resource_ref{audit}};
+        store_type to{libmem::resource_ref{audit}};
+
+        ASSERT_TRUE(libmem::relocate_grow(from, 8, 0));
+        ASSERT_TRUE(libmem::relocate_grow(to, 8, 0));
+        ASSERT_EQ(audit.outstanding(), 2u);
+
+        EXPECT_TRUE(to.adopt_from(from));
+        EXPECT_EQ(audit.outstanding(), 1u) << "the destination's old block must not leak";
+    }
+    EXPECT_EQ(audit.outstanding(), 0u);
+    EXPECT_EQ(audit.mismatches(), 0);
 }
 
 /* ============================================================================

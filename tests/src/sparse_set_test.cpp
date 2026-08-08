@@ -341,6 +341,53 @@ TEST(SparseSetFixed, FixedStorageIsNonGrowableButStillMovable) {
     EXPECT_FALSE(s.insert(entity{0})) << "no slots and no way to get any";
 }
 
+TEST(SparseSetSmall, SmallStorageAllocatesNothingUntilItOutgrowsBothArrays) {
+    /* The combination the storage docs claim but nothing else instantiates: both
+     * the dense array and the rebound sparse index sit inline, so a small set
+     * touches the resource zero times, and neither half can move. */
+    using small_set = libmem::sparse_set<entity, libmem::small_storage<entity, 16>>;
+
+    static_assert(small_set::growable);
+    static_assert(!small_set::relocatable);
+    static_assert(!std::movable<small_set>);
+
+    small_set s{};
+    EXPECT_EQ(s.capacity(), 16u);
+    EXPECT_EQ(s.index_capacity(), 16u) << "the rebound sparse index starts at N slots, not 0";
+
+    for (std::uint32_t i{}; i < 16; ++i) {
+        ASSERT_TRUE(s.insert(entity{i}).inserted) << "insert " << i;
+    }
+    EXPECT_FALSE(s.storage().spilled()) << "16 ids in a 16-slot buffer must not have spilled";
+
+    /* Past the inline extent both arrays spill, and unlike inline_storage the set
+     * keeps going rather than reporting full. */
+    for (std::uint32_t i{16}; i < 100; ++i) {
+        ASSERT_TRUE(s.insert(entity{i}).inserted) << "insert " << i;
+    }
+    EXPECT_EQ(s.size(), 100u);
+    EXPECT_TRUE(s.storage().spilled());
+    EXPECT_GE(s.index_capacity(), 100u);
+
+    for (std::uint32_t i{}; i < 100; ++i) {
+        EXPECT_TRUE(s.contains(entity{i})) << "lost " << i;
+    }
+
+    /* Erase and clear have to work on the spilled buffers too, which is the part
+     * static_asserts on the type never type-check. */
+    for (std::uint32_t i{}; i < 100; i += 2) {
+        EXPECT_TRUE(s.erase(entity{i})) << "erase " << i;
+    }
+    EXPECT_EQ(s.size(), 50u);
+    EXPECT_FALSE(s.contains(entity{0}));
+    EXPECT_TRUE(s.contains(entity{99}));
+
+    s.clear();
+    EXPECT_TRUE(s.empty());
+    EXPECT_FALSE(s.contains(entity{99})) << "clear must restore every tombstone";
+    EXPECT_TRUE(s.insert(entity{7}).inserted);
+}
+
 TEST(SparseSetArena, GrowsOutOfAnInjectedArena) {
     libmem::arena scratch{1 << 20};
     using arena_set = libmem::sparse_set<entity, libmem::dynamic_storage<entity, libmem::resource_ref<libmem::arena>>>;
