@@ -63,11 +63,19 @@
  *          invalidates references to the erased element and to the last one,
  *          which is moved into its place.
  *
- * @note The sparse array is flat, not paged: it is sized by the largest id ever
- *       inserted, so memory is O(max_id) and not O(size). Ids that are dense-ish
- *       from zero (a generational entity counter, a slot index) are the intended
- *       shape. `to_index` is the hook for an id that packs extra bits it should be
- *       indexed without.
+ * @section sparse_set_index The sparse side
+ *
+ * A third template argument, defaulting to `flat_sparse_index`: one subscript per
+ * id in `[0, max_id]`, so memory is O(max_id) and not O(size). `to_index` is the
+ * hook for an id that packs extra bits it should be indexed without.
+ *
+ * `paged_sparse_set` swaps in `paged_sparse_index`, which allocates page-sized
+ * spans of subscripts on demand. See @ref sparse_index_cost.
+ *
+ * @code
+ *     libmem::sparse_set<entity> dense{};              // ids clustered near zero
+ *     libmem::paged_sparse_set<entity> scattered{};    // ids spread over a wide range
+ * @endcode
  */
 module;
 
@@ -77,6 +85,7 @@ export module libmem:sparse_set;
 
 import :concepts;
 import :identifier;
+import :sparse_index;
 import :storage;
 import std;
 
@@ -91,11 +100,15 @@ namespace libmem {
  *
  * @tparam Id           Key type; see `regular_indexable_id`. `null_id_v<Id>` is
  *                      the reserved sentinel and is not insertable.
- * @tparam DenseStorage Storage for the dense id array. The sparse array uses
- *                      `DenseStorage::rebind<size_type>`, so one argument
- *                      configures both, and an injected resource reaches both.
+ * @tparam DenseStorage Storage for the dense id array.
+ * @tparam SparseIndex  Map from id subscript to dense position; see @ref
+ *                      sparse_set_index. Defaults to a flat array over
+ *                      `DenseStorage::rebind<size_type>`, so one storage argument
+ *                      configures both arrays and an injected resource reaches both.
  */
-export template <regular_indexable_id Id, storage_for<Id> DenseStorage = dynamic_storage<Id>> class sparse_set {
+export template <regular_indexable_id Id, storage_for<Id> DenseStorage = dynamic_storage<Id>,
+    sparse_index SparseIndex = flat_sparse_index<typename DenseStorage::template rebind<std::size_t>>>
+class sparse_set {
 public:
     /* ========================================================================
      * Member types
@@ -112,19 +125,19 @@ public:
     using const_iterator = const Id*;
 
     using dense_storage = DenseStorage;
-    using index_storage = typename DenseStorage::template rebind<size_type>;
+    using index_type = SparseIndex;
 
     /** @brief Reserved index meaning "absent"; also the tombstone in the sparse array. */
-    static constexpr size_type npos{std::numeric_limits<size_type>::max()};
+    static constexpr size_type npos{sparse_npos};
 
     /** @brief Whether inserting can grow, or fails once the fixed extent is full. */
-    static constexpr bool growable{growable_storage<DenseStorage> && growable_storage<index_storage>};
+    static constexpr bool growable{growable_storage<DenseStorage> && SparseIndex::growable};
 
     /** @brief The dense extent, or `dynamic_extent` when it is a runtime property. */
     static constexpr size_type static_capacity{DenseStorage::static_capacity};
 
     /** @brief Whether the set can be moved; false for inline storage, which cannot relocate. */
-    static constexpr bool relocatable{DenseStorage::relocatable && index_storage::relocatable};
+    static constexpr bool relocatable{DenseStorage::relocatable && SparseIndex::relocatable};
 
     /** @brief Outcome of `insert`: the dense position, and whether it was newly added. */
     struct insert_result {
@@ -155,10 +168,8 @@ public:
      * ======================================================================== */
 
     sparse_set()
-        requires std::default_initializable<index_storage> && std::default_initializable<DenseStorage>
-    {
-        fill_sparse(0);
-    }
+        requires std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage>
+    = default;
 
     /**
      * @brief Construct both arrays from `args`, typically a resource.
@@ -173,11 +184,9 @@ public:
      *       build and each needs its own copy.
      */
     template <typename... Args>
-        requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, sparse_set> && ...) && std::constructible_from<index_storage, Args&...> &&
+        requires(sizeof...(Args) > 0) && (!std::same_as<std::remove_cvref_t<Args>, sparse_set> && ...) && std::constructible_from<SparseIndex, Args&...> &&
                     std::constructible_from<DenseStorage, Args&...>
-    explicit sparse_set(Args&&... args) : sparse_{args...}, dense_{args...} {
-        fill_sparse(0);
-    }
+    explicit sparse_set(Args&&... args) : sparse_{args...}, dense_{args...} {}
 
     /**
      * @brief Construct from a range of ids, so `std::ranges::to` can build one.
@@ -187,7 +196,7 @@ public:
      * @endcode
      */
     template <std::ranges::input_range R>
-        requires std::convertible_to<std::ranges::range_reference_t<R>, const Id&> && std::default_initializable<index_storage> &&
+        requires std::convertible_to<std::ranges::range_reference_t<R>, const Id&> && std::default_initializable<SparseIndex> &&
                  std::default_initializable<DenseStorage>
     sparse_set(std::from_range_t, R&& range) : sparse_set() {
         insert_range(std::forward<R>(range));
@@ -227,8 +236,8 @@ public:
     /** @brief Ids that fit before the dense array has to grow. */
     constexpr size_type capacity() const noexcept { return dense_.capacity(); }
 
-    /** @brief Number of id slots the sparse array currently covers, i.e. `max_id + 1`. */
-    constexpr size_type index_capacity() const noexcept { return sparse_.capacity(); }
+    /** @brief Number of id subscripts the sparse index currently covers, i.e. `max_id + 1`. */
+    constexpr size_type index_capacity() const noexcept { return sparse_.covered(); }
 
     /**
      * @brief Grow the dense array to hold at least `n` ids.
@@ -259,19 +268,7 @@ public:
         const size_type at{to_index(id)};
         assert(at != npos && "sparse_set: id maps to the reserved npos subscript");
 
-        if (at < sparse_.capacity()) {
-            return true;
-        }
-        if constexpr (growable_storage<index_storage>) {
-            const size_type covered{sparse_.capacity()};
-            if (!relocate_grow(sparse_, at + 1, covered)) {
-                return false;
-            }
-            fill_sparse(covered);
-            return true;
-        } else {
-            return false;
-        }
+        return sparse_.reserve_for(at);
     }
 
     /* ========================================================================
@@ -279,16 +276,10 @@ public:
      * ======================================================================== */
 
     /** @brief Whether `id` is in the set. */
-    bool contains(const Id& id) const noexcept {
-        const size_type at{to_index(id)};
-        return at < sparse_.capacity() && sparse_.data()[at] != npos;
-    }
+    bool contains(const Id& id) const noexcept { return sparse_.get(to_index(id)) != npos; }
 
     /** @brief Dense position of `id`, or `npos` when it is absent. */
-    size_type index_of(const Id& id) const noexcept {
-        const size_type at{to_index(id)};
-        return at < sparse_.capacity() ? sparse_.data()[at] : npos;
-    }
+    size_type index_of(const Id& id) const noexcept { return sparse_.get(to_index(id)); }
 
     /** @brief The id at dense position `index`. */
     const Id& operator[](const size_type index) const noexcept {
@@ -333,10 +324,8 @@ public:
         const size_type at{to_index(id)};
         assert(at != npos && "sparse_set: id maps to the reserved npos subscript");
 
-        if (at < sparse_.capacity()) {
-            if (const size_type existing{sparse_.data()[at]}; existing != npos) {
-                return {existing, false};
-            }
+        if (const size_type existing{sparse_.get(at)}; existing != npos) {
+            return {existing, false};
         }
 
         if (!reserve_for(id) || !reserve(size_ + 1)) {
@@ -368,12 +357,7 @@ public:
      */
     erase_result erase(const Id& id) {
         const size_type at{to_index(id)};
-        if (at >= sparse_.capacity()) {
-            return {};
-        }
-
-        size_type* sparse{sparse_.data()};
-        const size_type index{sparse[at]};
+        const size_type index{sparse_.get(at)};
         if (index == npos) {
             return {};
         }
@@ -385,11 +369,11 @@ public:
 
         if (index != last) {
             dense[index] = std::move(dense[last]);
-            sparse[to_index(dense[index])] = index;
+            sparse_.set(to_index(dense[index]), index);
         }
 
         std::destroy_at(dense + last);
-        sparse[at] = npos;
+        sparse_.set(at, npos);
         --size_;
 
         return {true, index, index != last ? last : npos};
@@ -402,11 +386,10 @@ public:
      * present have to be restored.
      */
     void clear() noexcept {
-        size_type* sparse{sparse_.data()};
         const Id* dense{dense_.data()};
 
         for (size_type i{}; i < size_; ++i) {
-            sparse[to_index(dense[i])] = npos;
+            sparse_.set(to_index(dense[i]), npos);
         }
 
         std::destroy_n(dense_.data(), size_);
@@ -420,27 +403,16 @@ public:
     /** @brief Access the dense array's storage. */
     constexpr auto& storage(this auto&& self) noexcept { return self.dense_; }
 
+    /** @brief Access the sparse index, e.g. to ask a paged one how many pages it holds. */
+    constexpr auto& sparse(this auto&& self) noexcept { return self.sparse_; }
+
 private:
-    index_storage sparse_;
+    SparseIndex sparse_;
     DenseStorage dense_;
     size_type size_{};
 
     /**
-     * @brief Tombstone every sparse slot from `from` to the current capacity.
-     *
-     * Keeps the invariant that all `sparse_.capacity()` slots hold a live
-     * `size_type`, so a lookup never reads uninitialised memory and growth never
-     * has to track a separate initialised count.
-     */
-    void fill_sparse(const size_type from) noexcept {
-        size_type* sparse{sparse_.data()};
-        for (size_type i{from}; i < sparse_.capacity(); ++i) {
-            std::construct_at(sparse + i, npos);
-        }
-    }
-
-    /**
-     * @brief Append `id` at the dense back and point sparse slot `at` at it.
+     * @brief Append `id` at the dense back and point sparse subscript `at` at it.
      * @pre Both arrays already have room; see `reserve` and `reserve_for`.
      * @return The new dense position.
      */
@@ -448,13 +420,14 @@ private:
         /* Construct first: if the copy throws, neither the sparse slot nor the
          * size has been touched yet. */
         std::construct_at(dense_.data() + size_, id);
-        sparse_.data()[at] = size_;
+        sparse_.set(at, size_);
         return size_++;
     }
 
+    /* The sparse index owns its own slot lifetimes, so there is nothing to clean
+     * up here but the dense elements. */
     void destroy_all() noexcept {
         std::destroy_n(dense_.data(), size_);
-        std::destroy_n(sparse_.data(), sparse_.capacity());
         size_ = 0;
     }
 };
@@ -500,12 +473,15 @@ concept pair_range_for = std::ranges::input_range<R> && requires(std::ranges::ra
  *                      same requirement `std::vector::erase` imposes.
  * @tparam DenseStorage Storage for the dense key array; the payload array uses
  *                      `DenseStorage::rebind<T>`.
+ * @tparam SparseIndex  Map from id subscript to dense position; see @ref
+ *                      sparse_set_index.
  *
  * @warning Growth invalidates every pointer, reference, and iterator, and erase
  *          invalidates those to the erased element and to the last one. See
  *          @ref sparse_set_storage.
  */
-export template <regular_indexable_id Id, typename T, storage_for<Id> DenseStorage = dynamic_storage<Id>>
+export template <regular_indexable_id Id, typename T, storage_for<Id> DenseStorage = dynamic_storage<Id>,
+    sparse_index SparseIndex = flat_sparse_index<typename DenseStorage::template rebind<std::size_t>>>
     requires std::is_object_v<T>
 class sparse_map {
 public:
@@ -518,7 +494,7 @@ public:
     using size_type = std::size_t;
     using difference_type = std::ptrdiff_t;
 
-    using key_set = sparse_set<Id, DenseStorage>;
+    using key_set = sparse_set<Id, DenseStorage, SparseIndex>;
     using value_storage = typename DenseStorage::template rebind<T>;
 
     static constexpr size_type npos{key_set::npos};
@@ -773,6 +749,23 @@ private:
 };
 
 /* ============================================================================
+ * Paged aliases
+ * ============================================================================ */
+
+/**
+ * @brief `sparse_set` whose sparse side allocates pages on demand.
+ *
+ * For ids spread thinly over a wide range. Same interface and same O(1)
+ * operations, one extra indirection per lookup. See @ref sparse_index_cost.
+ */
+export template <regular_indexable_id Id, memory_resource Resource = default_resource>
+using paged_sparse_set = sparse_set<Id, dynamic_storage<Id, Resource>, paged_sparse_index<default_sparse_page_size, Resource>>;
+
+/** @brief `sparse_map` whose sparse side allocates pages on demand; see `paged_sparse_set`. */
+export template <regular_indexable_id Id, typename T, memory_resource Resource = default_resource>
+using paged_sparse_map = sparse_map<Id, T, dynamic_storage<Id, Resource>, paged_sparse_index<default_sparse_page_size, Resource>>;
+
+/* ============================================================================
  * Concept verification
  * ============================================================================ */
 
@@ -814,6 +807,24 @@ static_assert(std::same_as<std::tuple_element_t<1, std::ranges::range_reference_
 /* Both are buildable by std::ranges::to via their from_range_t constructors. */
 static_assert(std::constructible_from<dynamic_set, std::from_range_t, std::span<const sparse_test_id>>);
 static_assert(std::constructible_from<dynamic_map, std::from_range_t, std::span<const std::pair<sparse_test_id, int>>>);
+
+/* The paged variants differ only in the sparse side. */
+using paged_set = paged_sparse_set<sparse_test_id>;
+using paged_map = paged_sparse_map<sparse_test_id, int>;
+
+static_assert(std::ranges::contiguous_range<paged_set>);
+static_assert(paged_set::growable && paged_set::relocatable);
+static_assert(std::movable<paged_set>);
+static_assert(std::ranges::random_access_range<paged_map>);
+static_assert(std::movable<paged_map>);
+static_assert(std::constructible_from<paged_set, std::from_range_t, std::span<const sparse_test_id>>);
+
+/* A small-buffer set grows but does not move: small_storage is not relocatable. */
+using small_set = sparse_set<sparse_test_id, small_storage<sparse_test_id, 32>>;
+
+static_assert(small_set::growable);
+static_assert(!small_set::relocatable);
+static_assert(!std::movable<small_set>);
 
 } // namespace detail
 

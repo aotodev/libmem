@@ -58,9 +58,13 @@ export inline constexpr std::size_t default_alignment{alignof(std::max_align_t)}
  * Alignment and block-geometry concepts
  * ============================================================================ */
 
+/** @brief A non-zero power of two, so `/` and `%` by it are a shift and a mask. */
+export template <std::size_t N>
+concept power_of_two = (N > 0) && ((N & (N - 1)) == 0);
+
 /** @brief A valid alignment argument: a non-zero power of two. */
 export template <std::size_t N>
-concept valid_alignment = (N > 0) && ((N & (N - 1)) == 0);
+concept valid_alignment = power_of_two<N>;
 
 /**
  * @brief A valid block geometry: `Size` is the stride between blocks, `Align` the alignment

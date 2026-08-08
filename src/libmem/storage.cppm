@@ -4,17 +4,17 @@
  *
  * A `storage` owns *space* for `capacity()` objects of `value_type` and nothing
  * else. It never constructs, destroys, or counts elements; the container that
- * holds it does all of that. Keeping the split at "memory vs lifetime" is what
- * lets one container serve a fixed inline buffer, a resource-backed fixed
- * buffer, and a growing heap buffer without touching its own logic.
+ * holds it does all of that.
  *
- * Three implementations, differing on where the slots live and whether the
+ * Four implementations, differing on where the slots live and whether the
  * extent is fixed at compile time:
  *
  *   - `inline_storage<T, N>`:     N slots inside the object. No allocation.
  *   - `fixed_storage<T, N, R>`:   N slots from a `memory_resource`. Static extent,
  *                                 so `sizeof` stays small no matter how big N is.
  *   - `dynamic_storage<T, R>`:    runtime capacity, geometric growth (`std::vector`-like).
+ *   - `small_storage<T, N, R>`:   N slots inside the object, spilling to a
+ *                                 `memory_resource` once outgrown (SBO).
  *
  * @code
  *     libmem::spsc_ring<command, 64> small{};                    // inline slots
@@ -27,18 +27,16 @@
  *
  * @section growth The growth protocol
  *
- * Growth is three steps rather than one `try_grow`, because only the container
- * knows which slots hold live objects and how to move them:
+ * Growth is three steps, not one:
  *
  *   1. `reserve_block(n)` allocates a fresh block. The current block is untouched.
  *   2. The container relocates its live elements into the new block.
  *   3. `adopt(block)` releases the old block and takes the new one, or
  *      `discard(block)` throws the new one away and keeps the old.
  *
- * The payoff is that a failure at any point leaves the container exactly as it
- * was, including when a move constructor throws halfway through step 2, and that
- * a container growing two parallel arrays can order the fallible steps ahead of
- * the irreversible ones. `relocate_grow` implements the single-array case.
+ * A failure at any step leaves the container exactly as it was, including a move
+ * constructor throwing partway through step 2. `relocate_grow` implements the
+ * single-array case.
  */
 module;
 
@@ -136,6 +134,23 @@ concept growable_storage = storage<S> && requires(S& s, typename S::size_type n,
 export template <typename S>
 concept fixed_extent_storage = storage<S> && (S::static_capacity != dynamic_extent);
 
+/**
+ * @brief A `growable_storage` that can hand its off-object block over to another instance of itself.
+ *
+ * The run-time counterpart to `relocatable`, for a storage whose slots are only
+ * sometimes transferable. `adopt_from` succeeds when the source holds an
+ * off-object block, and reports `false` when the caller must move the elements
+ * itself.
+ *
+ * @note Distinct from `adopt`, which takes a block the caller reserved. This takes
+ *       over a live storage's block *and its resource*, so a block is never
+ *       released through a resource that did not supply it.
+ */
+export template <typename S>
+concept transferable_storage = growable_storage<S> && requires(S& s, S& other) {
+    { s.adopt_from(other) } -> std::same_as<bool>;
+};
+
 /* ============================================================================
  * Shared allocation helpers
  * ============================================================================ */
@@ -174,6 +189,20 @@ template <typename T, std::size_t Align, memory_resource Resource> void free_slo
     } else {
         resource.deallocate(ptr, count * sizeof(T));
     }
+}
+
+/** @brief Smallest capacity a growing storage ever allocates, so early inserts do not re-grow every time. */
+template <typename T> inline constexpr std::size_t growth_floor{sizeof(T) > 256 ? 1 : 256 / sizeof(T)};
+
+/**
+ * @brief Capacity to allocate when `current` slots must become at least `requested`.
+ *
+ * `max(requested, 2 * current, growth_floor)`, so repeated single-element growth
+ * stays amortised O(1). Shared by every growing storage.
+ */
+template <typename T> constexpr std::size_t next_capacity(const std::size_t current, const std::size_t requested) noexcept {
+    const std::size_t doubled{current > (std::numeric_limits<std::size_t>::max() / 2) ? current : current * 2};
+    return std::max({requested, doubled, growth_floor<T>});
 }
 
 } // namespace detail
@@ -332,7 +361,7 @@ public:
     static constexpr bool relocatable{true};
 
     /** @brief Smallest capacity ever allocated, so early inserts do not re-grow every time. */
-    static constexpr size_type min_capacity{sizeof(T) > 256 ? 1 : 256 / sizeof(T)};
+    static constexpr size_type min_capacity{detail::growth_floor<T>};
 
     constexpr dynamic_storage()
         requires std::default_initializable<Resource>
@@ -372,7 +401,7 @@ public:
      * @return A falsy block when the resource could not supply the memory.
      */
     [[nodiscard]] storage_block<T> reserve_block(const size_type n) {
-        const size_type target{next_capacity(n)};
+        const size_type target{detail::next_capacity<T>(capacity_, n)};
         T* ptr{detail::allocate_slots<T, Align>(resource_, target)};
         if (!ptr) {
             return {};
@@ -406,15 +435,168 @@ private:
     T* slots_{};
     size_type capacity_{};
 
-    constexpr size_type next_capacity(const size_type n) const noexcept {
-        const size_type doubled{capacity_ > (std::numeric_limits<size_type>::max() / 2) ? capacity_ : capacity_ * 2};
-        return std::max({n, doubled, min_capacity});
-    }
-
     void release() noexcept {
         detail::free_slots<T, Align>(resource_, slots_, capacity_);
         slots_ = nullptr;
         capacity_ = 0;
+    }
+};
+
+/* ============================================================================
+ * small_storage: inline slots that spill to a resource
+ * ============================================================================ */
+
+/**
+ * @brief `N` slots inside the object, spilling to a `memory_resource` once outgrown.
+ *
+ * `capacity()` starts at `N` with `data()` pointing into the object. The first
+ * growth past `N` takes a block through the protocol in @ref growth.
+ *
+ * @tparam T        Element type.
+ * @tparam N        Inline slot count.
+ * @tparam Resource Resource the spilled block comes from.
+ * @tparam Align    Alignment of both the inline array and the spilled block.
+ *
+ * @note Once spilled, always spilled: nothing moves back into the inline slots
+ *       when the element count drops.
+ *
+ * @note `relocatable` is `false`; moving the storage object cannot transfer slots
+ *       that are the object. `adopt_from` is the run-time path a container uses
+ *       instead.
+ *
+ * @warning `rebind<U>` keeps `N` as a *slot count*, not a byte budget. A
+ *          `sparse_set<entity, small_storage<entity, 64>>` gets 64 inline dense
+ *          slots **and** 64 inline `size_type` sparse slots.
+ */
+export template <typename T, std::size_t N, memory_resource Resource = default_resource, std::size_t Align = alignof(T)>
+    requires std::is_object_v<T> && (N > 0) && detail::valid_storage_alignment<T, Align>
+class small_storage {
+public:
+    using value_type = T;
+    using size_type = std::size_t;
+    using resource_type = Resource;
+    template <typename U> using rebind = small_storage<U, N, Resource>;
+
+    /* Dynamic: the capacity is N until it is not, so nothing may bake N in. */
+    static constexpr size_type static_capacity{dynamic_extent};
+    static constexpr size_type alignment{Align};
+    static constexpr bool relocatable{false};
+
+    /** @brief Slots available before the first spill. */
+    static constexpr size_type inline_capacity{N};
+
+    small_storage() noexcept
+        requires std::default_initializable<Resource>
+        : slots_{inline_data()} {}
+
+    explicit small_storage(Resource resource) noexcept : resource_{std::move(resource)}, slots_{inline_data()} {}
+
+    small_storage(const small_storage&) = delete;
+    small_storage& operator=(const small_storage&) = delete;
+    small_storage(small_storage&&) = delete;
+    small_storage& operator=(small_storage&&) = delete;
+
+    ~small_storage() { release(); }
+
+    T* data() noexcept { return slots_; }
+    const T* data() const noexcept { return slots_; }
+
+    constexpr size_type capacity() const noexcept { return capacity_; }
+
+    /** @brief Whether the slots have moved off the object. */
+    constexpr bool spilled() const noexcept { return capacity_ > N; }
+
+    /**
+     * @brief Allocate a block of at least `n` slots, leaving the current one live.
+     *
+     * Always a heap block: the returned capacity is at least `2 * capacity() > N`,
+     * so it can never collide with the inline array.
+     *
+     * @return A falsy block when the resource could not supply the memory.
+     */
+    [[nodiscard]] storage_block<T> reserve_block(const size_type n) {
+        const size_type target{detail::next_capacity<T>(capacity_, n)};
+        assert(target > N && "small_storage: a reserved block must be larger than the inline array");
+
+        T* ptr{detail::allocate_slots<T, Align>(resource_, target)};
+        if (!ptr) {
+            return {};
+        }
+        return {ptr, target};
+    }
+
+    /**
+     * @brief Release the current block, if it was a spilled one, and take `block`.
+     * @pre The container has already relocated its live elements into `block`.
+     */
+    void adopt(const storage_block<T> block) noexcept {
+        assert(block.data != nullptr && "small_storage: cannot adopt an empty block");
+        assert(block.data != inline_data() && "small_storage: cannot adopt the inline array");
+
+        release();
+        slots_ = block.data;
+        capacity_ = block.capacity;
+    }
+
+    /**
+     * @brief Give `block` back without adopting it; the current block stays live.
+     * @pre `block` holds no live objects and came from `reserve_block`.
+     */
+    void discard(const storage_block<T> block) noexcept {
+        assert(block.data != inline_data() && "small_storage: the inline array is not a reserved block");
+        detail::free_slots<T, Align>(resource_, block.data, block.capacity);
+    }
+
+    /**
+     * @brief Become a storage over `other`'s slots and resource, as far as the slots can travel.
+     *
+     * `other`'s resource is taken either way, spilled or not, so a block is never
+     * released through a resource that did not supply it.
+     *
+     * @return `true` when the block itself came across, leaving `other` inline.
+     *         `false` when `other` had not spilled, in which case the caller must
+     *         move `other`'s elements into these inline slots; they fit, both
+     *         arrays being `N` long.
+     * @pre This storage holds no live elements.
+     */
+    [[nodiscard]] bool adopt_from(small_storage& other) noexcept {
+        if (this == &other) {
+            return false;
+        }
+
+        release();
+        resource_ = other.resource_;
+
+        if (!other.spilled()) {
+            return false;
+        }
+
+        slots_ = std::exchange(other.slots_, other.inline_data());
+        capacity_ = std::exchange(other.capacity_, N);
+
+        return true;
+    }
+
+    /** @brief Access the backing resource. */
+    constexpr auto& resource(this auto&& self) noexcept { return self.resource_; }
+
+private:
+    Resource resource_{};
+    T* slots_{};
+    size_type capacity_{N};
+
+    /* Last, so the two words above stay near the front of the object. */
+    alignas(Align) std::byte inline_slots_[N * sizeof(T)];
+
+    T* inline_data() noexcept { return reinterpret_cast<T*>(inline_slots_); }
+
+    /** @brief Free the spilled block, if any, and fall back to the inline slots. */
+    void release() noexcept {
+        if (spilled()) {
+            detail::free_slots<T, Align>(resource_, slots_, capacity_);
+        }
+        slots_ = inline_data();
+        capacity_ = N;
     }
 };
 
@@ -471,7 +653,7 @@ export template <growable_storage S> bool relocate_grow(S& store, const typename
     return true;
 }
 
-/* Concept verification across the three storage kinds. */
+/* Concept verification across the four storage kinds. */
 static_assert(storage_for<inline_storage<int, 8>, int>);
 static_assert(fixed_extent_storage<inline_storage<int, 8>>);
 static_assert(!growable_storage<inline_storage<int, 8>>);
@@ -483,6 +665,18 @@ static_assert(!growable_storage<fixed_storage<int, 8>>);
 static_assert(storage_for<dynamic_storage<int>, int>);
 static_assert(!fixed_extent_storage<dynamic_storage<int>>);
 static_assert(growable_storage<dynamic_storage<int>>);
+static_assert(!transferable_storage<dynamic_storage<int>>);
+
+static_assert(storage_for<small_storage<int, 8>, int>);
+static_assert(!fixed_extent_storage<small_storage<int, 8>>);
+static_assert(growable_storage<small_storage<int, 8>>);
+static_assert(transferable_storage<small_storage<int, 8>>);
+/* Not relocatable: the inline slots are the object. A container over it moves via
+ * adopt_from instead, which is why the two are separate questions. */
+static_assert(!small_storage<int, 8>::relocatable);
+/* The inline array is really inline, and rebind keeps N as a slot count. */
+static_assert(sizeof(small_storage<int, 8>) >= 8 * sizeof(int));
+static_assert(small_storage<int, 8>::rebind<std::size_t>::inline_capacity == 8);
 
 /* rebind keeps the injected resource and resets the alignment to the new type's. */
 static_assert(std::same_as<dynamic_storage<int, resource_ref<default_resource>>::rebind<char>, dynamic_storage<char, resource_ref<default_resource>>>);

@@ -220,6 +220,8 @@ set(ModuleInterfaceFiles
     src/libmem/typed_arena.cppm
     src/libmem/pool.cppm
     src/libmem/spsc_ring.cppm
+    src/libmem/vector.cppm
+    src/libmem/sparse_index.cppm
     src/libmem/sparse_set.cppm
     src/libmem/libmem.cppm
 )
