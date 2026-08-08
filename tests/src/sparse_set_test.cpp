@@ -344,12 +344,13 @@ TEST(SparseSetFixed, FixedStorageIsNonGrowableButStillMovable) {
 TEST(SparseSetSmall, SmallStorageAllocatesNothingUntilItOutgrowsBothArrays) {
     /* The combination the storage docs claim but nothing else instantiates: both
      * the dense array and the rebound sparse index sit inline, so a small set
-     * touches the resource zero times, and neither half can move. */
+     * touches the resource zero times. */
     using small_set = libmem::sparse_set<entity, libmem::small_storage<entity, 16>>;
 
     static_assert(small_set::growable);
+    /* Moves relocate rather than transfer, but they do happen. */
     static_assert(!small_set::relocatable);
-    static_assert(!std::movable<small_set>);
+    static_assert(std::movable<small_set>);
 
     small_set s{};
     EXPECT_EQ(s.capacity(), 16u);
@@ -388,6 +389,59 @@ TEST(SparseSetSmall, SmallStorageAllocatesNothingUntilItOutgrowsBothArrays) {
     EXPECT_TRUE(s.insert(entity{7}).inserted);
 }
 
+TEST(SparseSetFixed, AnInlineSetMovesByRelocatingAndLeavesTheSourceCoherent) {
+    fixed_set from{};
+    for (std::uint32_t i{}; i < 8; ++i) {
+        ASSERT_TRUE(from.insert(entity{i}).inserted) << "insert " << i;
+    }
+
+    fixed_set to{std::move(from)};
+
+    EXPECT_EQ(to.size(), 8u);
+    for (std::uint32_t i{}; i < 8; ++i) {
+        EXPECT_TRUE(to.contains(entity{i})) << "lost " << i;
+        EXPECT_EQ(to[to.index_of(entity{i})], entity{i}) << "sparse and dense disagree at " << i;
+    }
+
+    /* The assertion that actually catches a half-moved inline index: the source's
+     * dense array is empty, so its sparse subscripts must have been tombstoned. A
+     * stale one would report membership at size() == 0 and index past the end. */
+    EXPECT_EQ(from.size(), 0u); // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    EXPECT_TRUE(from.empty());
+    for (std::uint32_t i{}; i < 8; ++i) {
+        EXPECT_FALSE(from.contains(entity{i})) << "moved-from set still claims " << i;
+        EXPECT_EQ(from.index_of(entity{i}), fixed_set::npos) << "stale subscript for " << i;
+    }
+
+    /* And it must be reusable, not merely empty. */
+    EXPECT_TRUE(from.insert(entity{3}).inserted);
+    EXPECT_EQ(from.size(), 1u);
+    EXPECT_EQ(from.index_of(entity{3}), 0u);
+    EXPECT_TRUE(to.contains(entity{3})) << "the destination must be unaffected";
+}
+
+TEST(SparseSetFixed, AnInlineSetMoveAssignsAndLeavesTheSourceCoherent) {
+    fixed_set from{};
+    ASSERT_TRUE(from.insert(entity{5}).inserted);
+    ASSERT_TRUE(from.insert(entity{9}).inserted);
+
+    fixed_set to{};
+    ASSERT_TRUE(to.insert(entity{1}).inserted);
+    ASSERT_TRUE(to.insert(entity{2}).inserted);
+
+    to = std::move(from);
+
+    EXPECT_EQ(to.size(), 2u);
+    EXPECT_TRUE(to.contains(entity{5}));
+    EXPECT_TRUE(to.contains(entity{9}));
+    EXPECT_FALSE(to.contains(entity{1})) << "the assigned-over contents must be gone, tombstones included";
+    EXPECT_FALSE(to.contains(entity{2}));
+
+    EXPECT_EQ(from.size(), 0u); // NOLINT(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+    EXPECT_FALSE(from.contains(entity{5}));
+    EXPECT_FALSE(from.contains(entity{9}));
+}
+
 TEST(SparseSetArena, GrowsOutOfAnInjectedArena) {
     libmem::arena scratch{1 << 20};
     using arena_set = libmem::sparse_set<entity, libmem::dynamic_storage<entity, libmem::resource_ref<libmem::arena>>>;
@@ -406,8 +460,10 @@ TEST(SparseSetArena, GrowsOutOfAnInjectedArena) {
 
 TEST(SparseSet, MoveTransfersEverything) {
     static_assert(std::movable<set>);
-    /* Inline slots are the object's own bytes, so they cannot relocate. */
-    static_assert(!std::movable<fixed_set>);
+    /* Inline slots are the object's own bytes, so the move relocates the ids
+     * rather than transferring a buffer. It still moves. */
+    static_assert(std::movable<fixed_set>);
+    static_assert(!fixed_set::relocatable);
 
     set from{};
     from.insert(entity{1});
