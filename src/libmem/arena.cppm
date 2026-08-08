@@ -4,19 +4,15 @@
  *
  * `arena` carves a single contiguous byte buffer with a monotonically advancing
  * cursor. Allocations are O(1), there is no per-allocation free, and the whole
- * region is reclaimed at once via `reset()` or at destruction. The allocator is
- * therefore well suited to short-lived scratch work where many small objects
- * share a common lifetime (per-frame data, parser scratch, intermediate
- * computations, ...).
+ * region is reclaimed at once via `reset()` or at destruction.
  *
  * The buffer can either be owned (heap-allocated internally) or borrowed
  * (provided by the caller as an `std::span<std::byte>`). Element placement
  * goes through `emplace<T>` / `push_back<T>`; both require `T` to be
  * trivially destructible since the arena never invokes destructors.
  *
- * `arena` also satisfies the `memory_resource` concept, so it can drop into
- * any allocator slot that accepts one (e.g. as the backing store of
- * `multislab` / `pool`).
+ * `arena` satisfies `aligned_memory_resource`, so it can back a `multislab`,
+ * a `pool`, or any storage.
  *
  * @code
  *     libmem::arena scratch{1 << 20};
@@ -141,9 +137,7 @@ public:
     /**
      * @brief Reserve uninitialised storage for `count` instances of `T`.
      *
-     * The returned memory is properly aligned for `T` but **not initialised**.
-     * Useful when the caller manages construction itself (e.g. parallel
-     * placement-new from a writer thread).
+     * Aligned for `T` but **not initialised**; the caller constructs.
      */
     template <typename T>
         requires std::is_trivially_destructible_v<T>

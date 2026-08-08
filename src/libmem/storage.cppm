@@ -95,10 +95,9 @@ export template <typename T> struct storage_block {
  * each container states for itself what it needs of its storage.
  *
  * `rebind<U>` yields the same storage kind holding `U` instead, keeping any
- * injected resource and resetting the alignment to `alignof(U)`. It is what lets
- * a container hold several parallel arrays of different element types over one
- * storage template argument, exactly as `std::allocator_traits::rebind_alloc`
- * does for allocators.
+ * injected resource and resetting the alignment to `alignof(U)`, so a container
+ * can hold several parallel arrays of different element types over one storage
+ * template argument.
  */
 export template <typename S>
 concept storage = requires(S& s, const S& cs) {
@@ -262,13 +261,11 @@ private:
  *
  * The extent is still a compile-time constant, so a container keeps whatever it
  * derived from it (a power-of-two mask, a compile-time bound check) while
- * `sizeof(storage)` stays a pointer plus the resource. This is the answer to
- * "the inline array is too big to sit in the object".
+ * `sizeof(storage)` stays a pointer plus the resource.
  *
- * The single allocation happens at construction. libmem resources report failure
- * by returning `nullptr` rather than throwing, so exhaustion here is a
- * precondition violation, asserted rather than reported: a fixed-extent buffer
- * that could not be obtained has no valid degraded state.
+ * @note The single allocation happens at construction, and exhaustion is
+ *       asserted rather than reported: a fixed-extent buffer that could not be
+ *       obtained has no valid degraded state.
  */
 export template <typename T, std::size_t N, memory_resource Resource = default_resource, std::size_t Align = alignof(T)>
     requires std::is_object_v<T> && (N > 0) && detail::valid_storage_alignment<T, Align>
@@ -315,10 +312,10 @@ public:
     /**
      * @brief `N`, or 0 once moved from.
      *
-     * Not `static constexpr`: a moved-from storage has handed its slots to the new
-     * owner, and reporting `N` while `data()` is null would invite the container to
-     * walk slots that do not exist. `static_capacity` is the compile-time constant;
-     * this is the one that tracks reality.
+     * @warning Not `static constexpr`. A moved-from storage has handed its slots
+     *          away, and reporting `N` while `data()` is null would let a container
+     *          walk slots that do not exist. `static_capacity` is the compile-time
+     *          constant.
      */
     constexpr size_type capacity() const noexcept { return slots_ ? N : 0; }
 

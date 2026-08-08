@@ -22,10 +22,6 @@
  *     };
  *     static_assert(libmem::regular_indexable_id<handle>);
  * @endcode
- *
- * This mirrors the identifier layer of the author's `libmep` graph module; the
- * names are kept identical where they are not graph-specific, so the two read
- * the same. `vertex_id*` there is `identifier`/`id_value*` here.
  */
 export module libmem:identifier;
 

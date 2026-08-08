@@ -2,10 +2,9 @@
  * @file slab.cppm
  * @brief Fixed-size block slab allocator with compile-time bitmap sizing.
  *
- * A zero-overhead slab allocator that carves a user-provided contiguous memory
- * region into fixed-size blocks, tracked by an inline bitmap. Block size and
- * maximum capacity are template parameters, enabling the compiler to reduce
- * index-to-pointer arithmetic to shifts and masks.
+ * Carves a user-provided contiguous memory region into fixed-size blocks,
+ * tracked by an inline bitmap. Block size and maximum capacity are template
+ * parameters, so index-to-pointer arithmetic reduces to shifts and masks.
  *
  * @code
  *     alignas(alignof(std::max_align_t)) std::byte storage[4096 * 8];
@@ -143,9 +142,8 @@ public:
     /**
      * @brief Allocate a single block, also reporting the bit-index it was taken from.
      *
-     * Callers that need to build an iterator (or otherwise address the block by
-     * index) should prefer this over `allocate()`: the index falls out of the
-     * bitmap scan for free, whereas recovering it afterwards costs another lookup.
+     * Prefer this over `allocate()` when the index is wanted: it falls out of the
+     * bitmap scan for free, and recovering it afterwards costs another lookup.
      *
      * @return `{ptr, index}` on success, `{nullptr, 0}` when the slab is full.
      */

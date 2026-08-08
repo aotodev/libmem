@@ -7,8 +7,8 @@
  * released according to a configurable hysteresis policy, keeping a small
  * reserve to avoid repeated grow/shrink cycles.
  *
- * The backing memory resource is injected via a concept-constrained template
- * parameter: zero virtual-dispatch overhead. Iteration over all allocated
+ * The backing memory resource is injected as a concept-constrained template
+ * parameter, so there is no virtual dispatch. Iteration over all allocated
  * blocks is exposed as a `std::ranges::input_range`.
  *
  * @code
@@ -350,10 +350,9 @@ public:
      * @brief Allocate a single block and return an iterator positioned at it.
      *
      * Equivalent to `allocate()` followed by `make_iterator(ptr)`, but O(1)
-     * instead of O(S): allocation already knows which slab node it took the
-     * block from and which bit-index it used, so neither the `find_owner`
-     * scan nor the bitmap lookup is needed. Prefer this whenever the caller
-     * wants the position; `pool::emplace` is the motivating case.
+     * instead of O(S): allocation already knows the owning slab node and the
+     * bit-index, so neither the `find_owner` scan nor the bitmap lookup is
+     * needed. Prefer this whenever the caller wants the position.
      */
     [[nodiscard]] allocation allocate_at() {
         const auto raw{allocate_raw()};

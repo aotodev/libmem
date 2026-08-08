@@ -57,11 +57,9 @@
  *
  * @warning Growth relocates, so **every pointer, reference, and iterator into the
  *          set is invalidated by an insert that grows it**, as with
- *          `std::vector`. Note that this is the opposite of `libmem::pool`, which
- *          guarantees pointer stability; the two make different trades and a
- *          reader coming from `pool` should not assume otherwise. Erasing
- *          invalidates references to the erased element and to the last one,
- *          which is moved into its place.
+ *          `std::vector`, and the opposite of `libmem::pool`. Erasing invalidates
+ *          references to the erased element and to the last one, which is moved
+ *          into its place.
  *
  * @section sparse_set_index The sparse side
  *
@@ -458,10 +456,8 @@ concept pair_range_for = std::ranges::input_range<R> && requires(std::ranges::ra
 /**
  * @brief Id-keyed map holding one `T` per member id, dense-packed alongside the keys.
  *
- * Composed of a `sparse_set` plus a parallel payload array, which is what keeps
- * `keys()` and `values()` both contiguous and index-aligned: the pair is what an
- * ECS-style consumer wants to iterate, and either can be handed to an algorithm
- * on its own.
+ * A `sparse_set` plus a parallel payload array, so `keys()` and `values()` are
+ * both contiguous and index-aligned.
  *
  * @tparam Id           Key type; see `regular_indexable_id`.
  * @tparam T            Payload type. Any object type: lifetimes are managed
@@ -619,11 +615,11 @@ public:
     /**
      * @brief The entries as a range of `(id, payload)` pairs.
      *
-     * A `std::views::zip` over the two spans, which is what makes the map itself a
-     * random-access range: `begin()` / `end()` below just forward to it, so
-     * `std::views::keys`, `std::views::values`, `std::views::elements`, and a
-     * structured-binding `for` all work directly on the map. Both spans are
-     * borrowed ranges, so the returned iterators outlive this temporary view.
+     * A `std::views::zip` over the two spans. `begin()` and `end()` forward to it,
+     * which is what makes the map itself a random-access range.
+     *
+     * @note Both spans are borrowed ranges, so the returned iterators outlive this
+     *       temporary view.
      */
     constexpr auto each(this auto&& self) noexcept { return std::views::zip(self.keys(), self.values()); }
 

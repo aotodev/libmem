@@ -10,12 +10,11 @@
  *     queue.consume_all([](const command& c) { apply(c); });       // consumer thread
  * @endcode
  *
- * The capacity stays a template parameter for every variant: the index mask is
- * derived from it and is read on every push and pop, so it is worth keeping as a
- * compile-time constant. What the storage argument chooses is *where* those slots
- * live, which is the part that scales: `spsc_ring<T, N>` puts them in the object,
- * `heap_spsc_ring<T, N>` takes them from a `memory_resource` so a large `N` does
- * not have to fit on the stack or inside an enclosing struct.
+ * The capacity is a template parameter for every variant, so the index mask read
+ * on each push and pop stays a compile-time constant. The storage argument
+ * chooses only *where* the slots live: `spsc_ring<T, N>` puts them in the object,
+ * `heap_spsc_ring<T, N>` takes them from a `memory_resource` so a large `N` need
+ * not fit on the stack or inside an enclosing struct.
  *
  * @warning Exactly one thread may call the producer half (`try_push`, `full`) and exactly
  *          one other the consumer half (`try_pop`, `consume_all`, `empty`). Two of either
@@ -191,9 +190,7 @@ private:
 
     void construct_slots() noexcept(std::is_nothrow_default_constructible_v<value_type>) {
         /* Every slot is a live object for the whole life of the ring: try_push
-         * assigns into one, which needs an object there to assign to. Zeroing all
-         * of them up front also matches what the plain `std::array<T, N>{}` this
-         * class used to hold did. */
+         * assigns into one, which needs an object there to assign to. */
         std::uninitialized_value_construct_n(storage_.data(), capacity());
     }
 
@@ -223,12 +220,11 @@ export template <typename T, std::size_t Capacity> using spsc_ring = basic_spsc_
 /**
  * @brief SPSC ring taking its `Capacity` slots from a `memory_resource`.
  *
- * `sizeof` is three cache lines regardless of `Capacity`, so this is the variant
- * for a queue too large to sit inline. The mask is still a compile-time constant.
+ * `sizeof` is three cache lines regardless of `Capacity`. The mask is still a
+ * compile-time constant.
  *
  * @note The single allocation happens at construction and is asserted to succeed:
- *       a ring that could not get its slots has no usable degraded state, and
- *       checking on every `try_push` would tax the hot path for it.
+ *       a ring that could not get its slots has no usable degraded state.
  */
 export template <typename T, std::size_t Capacity, memory_resource Resource = default_resource>
 using heap_spsc_ring = basic_spsc_ring<fixed_storage<T, Capacity, Resource, cache_line_size>>;
