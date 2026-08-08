@@ -137,15 +137,24 @@ TEST(VectorConcepts, EachAliasReportsWhatItsStorageCanDo) {
     static_assert(!libmem::inline_vector<int, 4>::growable);
     static_assert(!libmem::fixed_vector<int, 4>::growable);
 
-    /* Movable when the storage relocates, or when it can hand its block over. */
+    /* Every variant moves, and every move is noexcept, so generic code relocates
+     * by moving instead of falling back to copying. */
     static_assert(std::movable<libmem::vector<int>>);
     static_assert(std::movable<libmem::fixed_vector<int, 4>>);
     static_assert(std::movable<libmem::small_vector<int, 4>>);
-    static_assert(!std::movable<libmem::inline_vector<int, 4>>);
+    static_assert(std::movable<libmem::inline_vector<int, 4>>);
+    static_assert(std::is_nothrow_move_constructible_v<libmem::inline_vector<int, 4>>);
+
+    /* `relocatable` reports the cost of that move, not whether it exists. */
+    static_assert(libmem::vector<int>::relocatable);
+    static_assert(libmem::fixed_vector<int, 4>::relocatable);
+    static_assert(!libmem::inline_vector<int, 4>::relocatable);
+    static_assert(!libmem::small_vector<int, 4>::relocatable);
 
     /* Copying is deleted throughout, as it is for every other libmem container. */
     static_assert(!std::copyable<libmem::vector<int>>);
     static_assert(!std::copyable<libmem::small_vector<int, 4>>);
+    static_assert(!std::copyable<libmem::inline_vector<int, 4>>);
 
     /* A small_vector moves by adopting into a fresh storage, so it needs one it can
      * build. `relocatable` has to report that honestly rather than promising a move
