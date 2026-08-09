@@ -38,63 +38,31 @@ Everything lives in a single module (`import libmem;`) with partitions.
 **Containers do not hard-code their buffer.** Each takes a `storage` argument that
 owns raw space and nothing else, so one container serves an inline buffer, a
 resource-backed fixed buffer, a growing heap buffer, or a small-buffer-optimised
-one without touching its own logic.
+one without touching its own logic. The four kinds, the growth protocol and the
+resource interface are in [docs/storage.md](docs/storage.md).
 
 ```cpp
 libmem::spsc_ring<command, 64> small{};              // slots inline, no allocation
 libmem::heap_spsc_ring<command, 1 << 20> big{};      // same ring, slots on the heap
 
 libmem::small_vector<hit, 8> hits{};                 // allocates nothing until the 9th hit
-
-libmem::arena scratch{1 << 20};
-libmem::sparse_set<entity, libmem::dynamic_storage<entity, libmem::resource_ref<libmem::arena>>>
-    ids{libmem::resource_ref{scratch}};              // grows out of the arena
 ```
 
-**Failure is a return value, not an exception.** Resources report exhaustion by
-returning `nullptr`, and the containers pass that through: `push_back` returns a
-`T*`, `reserve` returns `bool`, `insert` returns a result you can test. Nothing
-here throws `std::bad_alloc` at you.
+**Failure is a return value, not an exception.** `push_back` returns a `T*`,
+`reserve` returns `bool`, and nothing throws `std::bad_alloc`. No container is
+implicitly copyable either, since a copy constructor could not report the
+failure; copying is explicit through `clone()` and `try_clone()`. Everything
+moves, inline buffers included, and every move is `noexcept`. See
+[docs/containers.md](docs/containers.md).
 
-**No hidden deep copies.** No container is implicitly copyable, because a copy
-constructor has no way to report that the resource ran out. Copying is explicit and
-fallible instead, the way Rust makes it explicit and infallible:
-
-```cpp
-libmem::inline_vector<int, 8> b{a.clone()};              // fixed extent, cannot fail
-if (auto c = heap_vec.try_clone()) { use(*c); }          // can fail, and says so
-```
-
-Everything moves, though, inline buffers included, and every move is `noexcept`.
-A non-movable container is a standing tax on generic code.
-
-**Growth cannot corrupt a container.** Allocating a new block, relocating into it,
-and committing to it are three separate steps, so a failed growth (or a throwing
-move constructor halfway through) leaves the container exactly as it was.
-
-**Over-alignment is checked, not assumed.** A resource that cannot express an
-alignment will not compile against an over-aligned request rather than silently
-under-aligning.
-
-**The inline containers work at compile time.** `inline_vector`, `sparse_set`, and
-`sparse_map` over inline storage constant-evaluate end to end whenever the element
-type is trivially default-constructible and trivially destructible, at no cost in
-size or alignment:
-
-```cpp
-constexpr int total = [] {
-    libmem::inline_vector<int, 8> v{};
-    v.push_back(10);
-    v.push_back(20);
-    v.erase(v.begin());
-    return v[0];
-}();
-static_assert(total == 20);
-```
+**The inline containers work at compile time.** `inline_vector`, `sparse_set`
+and `sparse_map` over inline storage constant-evaluate end to end for trivially
+default-constructible and trivially destructible element types, at no cost in
+size or alignment.
 
 **It interoperates both ways.** A `std::pmr::polymorphic_allocator` can back a
-libmem container, and `resource_allocator` turns any libmem resource into a standard
-Allocator, so an `arena` can back a `std::vector`, `std::list`, or `std::map`.
+libmem container, and `resource_allocator` turns any libmem resource into a
+standard Allocator, so an `arena` can back a `std::vector` or `std::map`.
 
 Intended for the places a general-purpose allocator is the wrong shape: an ECS
 storing components by entity id, a frame arena reset every tick, a lock-free
@@ -143,10 +111,3 @@ than a guarantee of exhaustive coverage. Details in
 - [Complexity](docs/complexity.md): cost tables for every component.
 - [Testing](docs/testing.md): what the suites and fuzzers actually cover.
 - [Integration](docs/integration.md): consuming libmem from another CMake project.
-
-## Planned
-
-- `freelist`: intrusive free-list allocator for variable-size blocks.
-- libFuzzer harnesses for `basic_vector` and for the paged sparse index.
-- A `shrink_to_fit` on `basic_vector`, which needs a shrink step in the storage
-  block protocol before `small_storage` could unspill.

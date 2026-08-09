@@ -192,6 +192,8 @@ is move-only.
 | `typed_arena` | Bump allocator with LIFO destructor chain for arbitrary types. |
 | `pool` | Pointer-stable typed container (bitmap-based object pool) over `multislab`. |
 
+Planned: `freelist`, an intrusive free-list allocator for variable-size blocks.
+
 `find_owner` is a linear scan over slab pages, and is what makes `deallocate` O(S)
 on `multislab` and `pool`. Allocation avoids it entirely: `slab::allocate_at()` and
 `multislab::allocate_at()` return the block *plus* its position, both of which the

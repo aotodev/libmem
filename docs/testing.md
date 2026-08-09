@@ -72,6 +72,8 @@ differential, comparing every operation against a standard container.
 
 They currently drive the flat sparse index only. See [fuzz/README.md](../fuzz/README.md).
 
+Planned: harnesses for `basic_vector` and for the paged sparse index.
+
 ## Scope
 
 This is an early-stage library and a C++26 modules testbed. Treat the above as what
