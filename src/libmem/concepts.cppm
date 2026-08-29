@@ -115,6 +115,34 @@ concept aligned_memory_resource = memory_resource<T> && requires(T& r, std::size
 };
 
 /**
+ * @brief Opt-in trait marking `R` as reclaiming its memory in bulk.
+ *
+ * Specialise to `true` for a resource whose `deallocate` is a no-op and whose
+ * memory is released wholesale, by `reset()` or by destruction, rather than one
+ * allocation at a time. A bump allocator is the canonical case.
+ *
+ * The promise is semantic and cannot be checked: `deallocate` being a no-op has
+ * the same signature as one that frees. Hence a trait rather than a `requires`
+ * clause. Requiring `reset()` syntactically would be no better, because it would
+ * reject `resource_ref` to an arena, which forwards allocation but not reset.
+ */
+export template <typename R> inline constexpr bool enable_monotonic_resource = false;
+
+/**
+ * @brief A `memory_resource` whose allocations need never be individually freed.
+ *
+ * The requirement of any caller that carves a fixed set of blocks once and lets
+ * the resource reclaim them together. Passing a resource that does expect paired
+ * deallocation, `default_resource` for instance, would leak every block.
+ */
+export template <typename T>
+concept monotonic_resource = memory_resource<T> && enable_monotonic_resource<std::remove_cvref_t<T>>;
+
+/** @brief A `monotonic_resource` that also honours an explicit alignment. */
+export template <typename T>
+concept aligned_monotonic_resource = aligned_memory_resource<T> && monotonic_resource<T>;
+
+/**
  * @brief Default memory resource using global `operator new` / `operator delete`.
  */
 export struct default_resource {
@@ -190,8 +218,13 @@ private:
     R* resource_{};
 };
 
+/** @brief A reference is monotonic exactly when its referent is. */
+template <typename R> inline constexpr bool enable_monotonic_resource<resource_ref<R>> = enable_monotonic_resource<R>;
+
 static_assert(memory_resource<resource_ref<default_resource>>);
 static_assert(aligned_memory_resource<resource_ref<default_resource>>);
+static_assert(!monotonic_resource<default_resource>, "operator new expects a paired delete");
+static_assert(!monotonic_resource<resource_ref<default_resource>>);
 
 /**
  * @brief Adapts a standard Allocator to the `memory_resource` interface.
