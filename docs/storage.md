@@ -83,6 +83,30 @@ The aligned and unaligned halves are not interchangeable. Memory taken from
 with the same alignment, which is why `allocate_slots` and `free_slots` branch on
 one condition and must never diverge.
 
+### Monotonic resources
+
+A caller that carves a fixed set of blocks once and never frees them
+individually, letting the resource reclaim everything together, needs more than
+`memory_resource` promises. `default_resource` satisfies the interface and would
+leak every block under that usage.
+
+`monotonic_resource` (and `aligned_monotonic_resource`) express the stronger
+requirement: `deallocate` is a no-op and the memory is released wholesale, by
+`reset()` or by destruction. `arena` and `typed_arena` model it; `resource_ref<R>`
+inherits whatever `R` is.
+
+The promise is semantic, so it is an opt-in trait rather than a `requires`
+clause; a no-op `deallocate` is indistinguishable from a real one by signature.
+A caller's own bump allocator joins with one line:
+
+```cpp
+template <>
+inline constexpr bool libmem::enable_monotonic_resource<my_bump> = true;
+```
+
+Requiring `reset()` syntactically instead would be no better: it would reject
+`resource_ref` to an arena, which forwards allocation but not reset.
+
 ## The growth protocol
 
 Growth is three steps rather than one `try_grow`, because only the container knows
