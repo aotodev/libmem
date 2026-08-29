@@ -226,6 +226,16 @@ private:
 
 static_assert(aligned_memory_resource<arena>);
 
+/**
+ * @brief `arena` reclaims in bulk.
+ *
+ * Bump allocation with a no-op `deallocate`; the whole buffer is reclaimed by
+ * `reset()` or by the destructor.
+ */
+template <> inline constexpr bool enable_monotonic_resource<arena> = true;
+
+static_assert(aligned_monotonic_resource<arena>);
+
 } // namespace libmem
 
 // NOLINTEND(cppcoreguidelines-pro-type-reinterpret-cast, cppcoreguidelines-owning-memory, cppcoreguidelines-pro-bounds-pointer-arithmetic)
