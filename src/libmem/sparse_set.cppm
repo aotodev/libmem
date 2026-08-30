@@ -52,6 +52,9 @@
  *   - `inline_storage<Id, N>` gives a fixed set that allocates nothing, holding at
  *     most `N` ids drawn from `[0, N)` (the rebound sparse array has `N` slots
  *     too). `insert` reports failure instead of growing.
+ *   - `constexpr_inline_storage<Id, N>` is that same fixed set with the slots
+ *     default-initialised, which is what keeps a map constant-evaluable over a
+ *     mapped type that is not trivially default constructible.
  *   - `fixed_storage<Id, N, R>` is the same fixed extent with the slots on a
  *     resource.
  *
@@ -1070,8 +1073,28 @@ consteval int constexpr_map() {
     return found ? *found : -1;
 }
 
+/* A payload with member initialisers is not trivially default constructible, so
+ * the dense storage has to be asked for typed slots for the map to stay
+ * constant-evaluable over it. */
+struct sparse_test_value {
+    float x{}, y{};
+};
+
+using constexpr_inline_map = sparse_map<sparse_test_id, sparse_test_value, constexpr_inline_storage<sparse_test_id, 32>>;
+
+consteval float constexpr_default_init_map() {
+    constexpr_inline_map m{};
+    m.emplace(sparse_test_id{1}, sparse_test_value{1.0F, 2.0F});
+    m.emplace(sparse_test_id{2}, sparse_test_value{3.0F, 4.0F});
+    m.erase(sparse_test_id{1});
+
+    const sparse_test_value* found{m.find(sparse_test_id{2})};
+    return found ? found->x + found->y : -1.0F;
+}
+
 static_assert(constexpr_set() == 8);
 static_assert(constexpr_map() == 20);
+static_assert(constexpr_default_init_map() == 7.0F);
 
 template <typename S>
 concept has_clone = requires(const S& s) { s.clone(); };

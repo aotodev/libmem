@@ -566,6 +566,15 @@ export template <typename T, std::size_t N, memory_resource Resource = default_r
  */
 export template <typename T, std::size_t N> using inline_vector = basic_vector<inline_storage<T, N>>;
 
+/**
+ * @brief `inline_vector` whose slots are default-initialised, for a `T` that is `constexpr` default constructible but not trivially so.
+ *
+ * The opt-in that trades `N` default constructions at construction for constant
+ * evaluation over an element type `inline_vector` can only hold as raw bytes. See
+ * `constexpr_inline_storage` for the requirements on `T` and for what the cost is.
+ */
+export template <typename T, std::size_t N> using constexpr_inline_vector = basic_vector<constexpr_inline_storage<T, N>>;
+
 /** @brief Bounded vector of `N` elements with the slots on a resource instead of inline. */
 export template <typename T, std::size_t N, memory_resource Resource = default_resource> using fixed_vector = basic_vector<fixed_storage<T, N, Resource>>;
 
@@ -585,8 +594,10 @@ static_assert(std::constructible_from<vector<int>, std::from_range_t, std::span<
 static_assert(std::movable<vector<int>>);
 static_assert(std::movable<small_vector<int, 8>>);
 static_assert(std::movable<inline_vector<int, 8>>);
+static_assert(std::movable<constexpr_inline_vector<int, 8>>);
 static_assert(std::movable<fixed_vector<int, 8>>);
 static_assert(std::is_nothrow_move_constructible_v<inline_vector<int, 8>>);
+static_assert(std::is_nothrow_move_constructible_v<constexpr_inline_vector<int, 8>>);
 static_assert(std::is_nothrow_move_constructible_v<small_vector<int, 8>>);
 
 /* `relocatable` is now a cost, not an availability: true where a move is a
@@ -594,11 +605,14 @@ static_assert(std::is_nothrow_move_constructible_v<small_vector<int, 8>>);
 static_assert(vector<int>::relocatable);
 static_assert(fixed_vector<int, 8>::relocatable);
 static_assert(!inline_vector<int, 8>::relocatable);
+static_assert(!constexpr_inline_vector<int, 8>::relocatable);
 static_assert(!small_vector<int, 8>::relocatable);
 
 static_assert(vector<int>::growable && small_vector<int, 8>::growable);
 static_assert(!inline_vector<int, 8>::growable && !fixed_vector<int, 8>::growable);
+static_assert(!constexpr_inline_vector<int, 8>::growable);
 static_assert(inline_vector<int, 8>::static_capacity == 8);
+static_assert(constexpr_inline_vector<int, 8>::static_capacity == 8);
 static_assert(sizeof(small_vector<int, 8>) >= 8 * sizeof(int));
 
 /* Copying is never implicit; a deep copy goes through clone / try_clone. */
@@ -638,11 +652,65 @@ consteval std::size_t constexpr_clone() {
     return b.size();
 }
 
+/* The two shapes the opt-in storage exists for: an aggregate with member
+ * initialisers, and a user-provided `constexpr` default constructor. Neither is
+ * trivially default constructible, so `inline_vector` holds both as raw bytes. */
+struct nsdmi_point {
+    int x{}, y{};
+};
+
+struct summed {
+    int v;
+
+    constexpr summed() : v{} {}
+    constexpr summed(const int a, const int b) : v{a + b} {}
+};
+
+/** @brief The same round trip over an element `inline_vector` could not constant-evaluate. */
+consteval int constexpr_default_init_round_trip() {
+    constexpr_inline_vector<nsdmi_point, 8> v{};
+
+    for (int i{}; i < 5; ++i) {
+        v.push_back(nsdmi_point{i * 2, i});
+    }
+    v.erase(v.begin());
+    v.pop_back();
+
+    int sum{};
+    for (const nsdmi_point& p : v) {
+        sum += p.x;
+    }
+    return sum;
+}
+
+/** @brief Erase, re-emplace over the freed slot, then clone: the whole lifetime path on a live `T[N]`. */
+consteval int constexpr_default_init_clone() {
+    constexpr_inline_vector<summed, 4> a{};
+
+    a.emplace_back(2, 3);
+    a.emplace_back(10, 20);
+    a.erase(a.begin());
+    a.emplace_back(1, 1);
+
+    const constexpr_inline_vector<summed, 4> b{a.clone()};
+
+    int sum{};
+    for (const summed& s : b) {
+        sum += s.v;
+    }
+    return sum;
+}
+
 } // namespace detail
 
 /* {0,2,4,6,8} minus the first and the last is {2,4,6}. */
 static_assert(detail::constexpr_round_trip() == 12);
 static_assert(detail::constexpr_clone() == 2);
+
+/* Same fold, same result, over a type the trait excludes. */
+static_assert(detail::constexpr_default_init_round_trip() == 12);
+/* {5,30} minus the first, plus 2, is {30,2}. */
+static_assert(detail::constexpr_default_init_clone() == 32);
 
 /* The slot array is a real T[N] where T allows it, so the storage costs nothing
  * extra and stays exactly as large as before. */
@@ -657,6 +725,11 @@ static_assert(inline_storage<int, 8, cache_line_size>::alignment == cache_line_s
 static_assert(!inline_storage<std::string, 4>::constexpr_usable);
 static_assert(sizeof(inline_storage<std::string, 4>) == 4 * sizeof(std::string));
 static_assert(std::movable<inline_vector<std::string, 4>>);
+
+/* The opt-in moves that line, it does not erase it: a destructor to run keeps `T`
+ * out either way, since the slot array would run it a second time. */
+static_assert(!inline_storage<detail::nsdmi_point, 8>::constexpr_usable);
+static_assert(constexpr_inline_storage<detail::nsdmi_point, 8>::constexpr_usable);
 
 namespace detail {
 
@@ -673,12 +746,14 @@ concept has_try_clone = requires(const V& v) { v.try_clone(); };
 
 /* clone is offered only where it cannot report a failure; try_clone everywhere. */
 static_assert(detail::has_clone<inline_vector<int, 8>>);
+static_assert(detail::has_clone<constexpr_inline_vector<int, 8>>);
 static_assert(detail::has_clone<fixed_vector<int, 8>>);
 static_assert(!detail::has_clone<vector<int>>);
 static_assert(!detail::has_clone<small_vector<int, 8>>);
 
 static_assert(detail::has_try_clone<vector<int>>);
 static_assert(detail::has_try_clone<inline_vector<int, 8>>);
+static_assert(detail::has_try_clone<constexpr_inline_vector<int, 8>>);
 
 static_assert(std::same_as<decltype(std::declval<const vector<int>&>().try_clone()), std::optional<vector<int>>>);
 static_assert(std::same_as<decltype(std::declval<const inline_vector<int, 8>&>().clone()), inline_vector<int, 8>>);

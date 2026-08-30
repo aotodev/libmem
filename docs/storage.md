@@ -12,6 +12,7 @@ touching its own logic.
 | `fixed_storage<T, N, R>` | compile-time | from a `memory_resource` |
 | `dynamic_storage<T, R>` | runtime, geometric growth | from a `memory_resource` |
 | `small_storage<T, N, R>` | runtime, geometric growth | inside the object for the first `N`, then from a `memory_resource` |
+| `constexpr_inline_storage<T, N>` | compile-time | inside the object, default-initialised |
 
 ```cpp
 libmem::spsc_ring<command, 64> small{};              // slots inline
@@ -59,6 +60,34 @@ The resource-backed kinds cannot follow, for an unrelated reason: they reach
 `::operator new` through their resource, and only `std::allocator<T>::allocate` is
 blessed for constant evaluation. Their members carry `constexpr` but can only ever
 run at run time.
+
+## Opting in: `constexpr_inline_storage`
+
+That table is a property of `T`, not a choice, and it is stricter than constant
+evaluation itself needs. A `T` whose default constructor is `constexpr` but not
+trivial (an aggregate with member initialisers, a user-provided `constexpr`
+constructor) can hold a real `T[N]` perfectly well. What it cannot hold is an
+*uninitialised* one, which is the only thing the trait is protecting.
+
+`constexpr_inline_storage<T, N>` makes that trade, named at the call site:
+
+```cpp
+struct vec2 { float x{}, y{}; };                     // not trivially default constructible
+
+libmem::inline_vector<vec2, 8> plain{};              // raw bytes, run time only
+libmem::constexpr_inline_vector<vec2, 8> folded{};   // vec2[8], constant-evaluable
+```
+
+The cost is `N` default constructions when the storage is built, for slots nobody
+has used yet, which is the work `inline_storage` exists to avoid. Hence a separate
+name rather than a relaxed trait: worth paying when it is asked for, not worth
+paying silently. Capacity, alignment and `sizeof` are unchanged, and for a
+trivially default constructible `T` the two are the same thing in all but name.
+
+`T` must still be trivially destructible. The slot array destroys its elements, so
+a real destructor would run a second time over what the container already
+destroyed. `rebind<U>` carries both requirements, which is what a `sparse_map` over
+this storage applies to its mapped type.
 
 ## Resources
 

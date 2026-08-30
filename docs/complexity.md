@@ -70,4 +70,9 @@ element type allows it, so `sizeof` and `alignof` are identical on both branches
 the array is never zeroed. A container that constant-evaluates costs exactly what
 the same container costs at run time.
 
+`constexpr_inline_storage` is the one exception, and the reason it is opt-in rather
+than a wider trait: it default-initialises its slots, so construction runs `N`
+default constructors where `inline_storage` runs none. `sizeof` and `alignof` are
+still identical, and every other operation still costs what it costs at run time.
+
 See [containers.md](containers.md#constant-evaluation) for which containers qualify.

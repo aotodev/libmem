@@ -248,6 +248,26 @@ lets that array be left trivially default-initialised inside a `constexpr`
 constructor, so nothing is zeroed at runtime and `sizeof` is unchanged.
 `inline_storage<T, N>::constexpr_usable` reports which branch a `T` takes.
 
+A `T` that is `constexpr` default-constructible but not *trivially* so, which is
+any type with a member initialiser or a user-provided `constexpr` constructor, is
+not shut out; it has to ask. `constexpr_inline_vector<T, N>`, or
+`constexpr_inline_storage<T, N>` under a sparse container, holds the same `T[N]`
+and default-initialises it:
+
+```cpp
+struct vec2 { float x{}, y{}; };
+
+constexpr float folded = [] {
+    libmem::constexpr_inline_vector<vec2, 8> v{};
+    v.push_back(vec2{1.0F, 2.0F});
+    return v[0].x + v[0].y;
+}();
+static_assert(folded == 3.0F);
+```
+
+The `N` default constructions that costs are why it is a separate name rather than
+a wider trait; [docs/storage.md](storage.md) has the trade in full.
+
 Raw bytes are the obstacle, not a missing keyword: `reinterpret_cast` is forbidden
 during constant evaluation, so a byte array can never be viewed as a `T*`. The
 single-member-union trick that constexpr `std::vector` uses does not help either,

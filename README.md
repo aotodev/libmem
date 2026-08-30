@@ -25,6 +25,7 @@ Clang >= 22 and GCC >= 15.
 | `vector` | Contiguous growable sequence. |
 | `small_vector` | Same, holding its first `N` elements inline and spilling past them. |
 | `inline_vector` | Same, bounded at `N` inline elements; allocates nothing, ever, and works at compile time. |
+| `constexpr_inline_vector` | Same, for an element type that is `constexpr` default-constructible but not trivially so; default-initialises its slots to get there. |
 | `fixed_vector` | Same, bounded at `N` with the slots on a resource instead of inline. |
 | `sparse_set` | Dense-packed id set, O(1) insert / erase / contains, contiguous iteration. |
 | `sparse_map` | `sparse_set` plus a payload per id; `keys()` and `values()` stay index-aligned. |
@@ -58,7 +59,9 @@ moves, inline buffers included, and every move is `noexcept`. See
 **The inline containers work at compile time.** `inline_vector`, `sparse_set`
 and `sparse_map` over inline storage constant-evaluate end to end for trivially
 default-constructible and trivially destructible element types, at no cost in
-size or alignment.
+size or alignment. `constexpr_inline_vector` opts an element type whose default
+constructor is `constexpr` but not trivial into the same thing, for the price of
+running it once per slot.
 
 **It interoperates both ways.** A `std::pmr::polymorphic_allocator` can back a
 libmem container, and `resource_allocator` turns any libmem resource into a

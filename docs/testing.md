@@ -54,6 +54,13 @@ being as far as atomics allow. The non-trivial fallback is covered too: a
 `std::string` element takes the byte-array branch, which cannot constant-evaluate but
 must still move and clone correctly at run time.
 
+The opt-in storage is pinned the same way, over both shapes the default trait turns
+away: `constexpr_inline_vector` runs the same erase-and-clone round trip over an
+aggregate with member initialisers and over a user-provided `constexpr` constructor,
+and a `sparse_map` over `constexpr_inline_storage` does it with such a type as its
+payload. What it costs is a runtime test rather than a `static_assert`, since
+counting the default constructions is exactly what a `static_assert` cannot do.
+
 Two helper types carry most of the weight. A counting payload proves no leaks and
 no double destroys; a payload whose move throws once a budget runs out is what
 actually instantiates the rollback branch of `relocate_grow`, which every
