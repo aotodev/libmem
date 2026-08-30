@@ -81,7 +81,12 @@ elements should not touch the heap.
 ./scripts/make.sh --release    # Release, Clang
 ./scripts/make.sh --test       # Build and run tests
 ./scripts/make.sh --shared     # Shared library
+./scripts/make.sh --clangd     # Editor database in build-clangd/
 ```
+
+The editor database is a directory of its own because `build/` alternates
+compilers: clangd is clang, and cannot read gcc's module flags. See
+[`.clangd`](.clangd).
 
 Or directly with CMake:
 
