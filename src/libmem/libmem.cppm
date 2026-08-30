@@ -8,7 +8,7 @@
  *   - **Resources**: `default_resource`, `resource_ref`, `allocator_resource`, `threshold_policy`.
  *   - **Interop**: `resource_allocator`, a standard Allocator over any libmem resource.
  *   - **Identifiers**: `regular_indexable_id`, `null_id_v`, `to_index`.
- *   - **Storage**: `inline_storage`, `fixed_storage`, `dynamic_storage`, `small_storage`, `relocate_grow`.
+ *   - **Storage**: `inline_storage`, `constexpr_inline_storage`, `fixed_storage`, `dynamic_storage`, `small_storage`, `relocate_grow`.
  *   - **Sparse index**: `flat_sparse_index`, `paged_sparse_index`.
  *   - **Allocators**: `slab`, `multislab`, `arena`, `typed_arena`.
  *   - **Containers**: `pool`, `spsc_ring`, `vector`, `small_vector`, `sparse_set`, `sparse_map`.

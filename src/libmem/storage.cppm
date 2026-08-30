@@ -6,10 +6,13 @@
  * else. It never constructs, destroys, or counts elements; the container that
  * holds it does all of that.
  *
- * Four implementations, differing on where the slots live and whether the
- * extent is fixed at compile time:
+ * Five implementations, differing on where the slots live, whether the extent is
+ * fixed at compile time, and whether the slots start out initialised:
  *
  *   - `inline_storage<T, N>`:     N slots inside the object. No allocation.
+ *   - `constexpr_inline_storage<T, N>`: the same, default-initialised, so a `T`
+ *                                 whose default constructor is `constexpr` but not
+ *                                 trivial still constant-evaluates.
  *   - `fixed_storage<T, N, R>`:   N slots from a `memory_resource`. Static extent,
  *                                 so `sizeof` stays small no matter how big N is.
  *   - `dynamic_storage<T, R>`:    runtime capacity, geometric growth (`std::vector`-like).
@@ -308,25 +311,49 @@ template <typename T>
 concept constexpr_inline_slots = std::is_trivially_default_constructible_v<T> && std::is_trivially_destructible_v<T>;
 
 /**
- * @brief The slot array behind `inline_storage`, chosen so `T[N]` is used where it can be.
+ * @brief Whether `T[N]` slots are sound for a `T` that default-initialises to something.
+ *
+ * What `constexpr_inline_storage` asks of its element type. Trivial destruction is
+ * the part that is not negotiable: the slot array destroys every element, so a `T`
+ * with a real destructor would be destroyed twice, once by the container and once
+ * by the array.
+ */
+template <typename T>
+concept default_init_inline_slots = std::default_initializable<T> && std::is_trivially_destructible_v<T>;
+
+/**
+ * @brief Whether `T` can be default-constructed during constant evaluation.
+ *
+ * There is no trait for this, and `is_trivially_default_constructible_v` answers a
+ * stricter question. Spelled as a value-initialisation in a template argument,
+ * which is a substitution failure exactly when the constructor cannot run at
+ * compile time.
+ */
+template <typename T>
+concept constexpr_default_constructible = default_init_inline_slots<T> && requires { typename std::bool_constant<(static_cast<void>(T{}), true)>; };
+
+/**
+ * @brief The slot array behind the inline storages, chosen so `T[N]` is used where it can be.
  *
  * Raw bytes cannot be reinterpreted during constant evaluation, so a byte array
  * shuts `inline_vector` out of constexpr entirely. A real `T[N]` has no such
- * problem and costs nothing extra: P1331 permits leaving it trivially
- * default-initialised inside a `constexpr` constructor, so it is not zeroed at
- * runtime either.
+ * problem.
+ *
+ * `Typed` is the storage's choice, not a property of `T`: the default picks the
+ * array only where it costs nothing, `constexpr_inline_storage` asks for it
+ * knowing that `N` default constructors then run.
  */
-template <typename T, std::size_t N, std::size_t Align, bool Trivial = constexpr_inline_slots<T>> struct inline_slots {
-    /* Deliberately uninitialised. A braced initialiser here would zero the whole
-     * array on every construction, which is exactly what this storage exists to
-     * avoid. */
+template <typename T, std::size_t N, std::size_t Align, bool Typed = constexpr_inline_slots<T>> struct inline_slots {
+    /* Default-initialised, not braced. For a trivially default constructible `T`
+     * that leaves the array alone, and P1331 permits leaving it alone inside a
+     * `constexpr` constructor too; braces would zero it on every construction. */
     alignas(Align) T slots[N];
 
     constexpr T* data() noexcept { return slots; }
     constexpr const T* data() const noexcept { return slots; }
 };
 
-/** Non-trivial `T`: raw bytes, and therefore no constant evaluation. */
+/** Untyped slots: raw bytes, and therefore no constant evaluation. */
 template <typename T, std::size_t N, std::size_t Align> struct inline_slots<T, N, Align, false> {
     alignas(Align) std::byte slots[N * sizeof(T)];
 
@@ -384,6 +411,75 @@ private:
     /* No initialiser: braces here would value-initialise the array and zero it on
      * every construction. */
     detail::inline_slots<T, N, Align> slots_;
+};
+
+/* ============================================================================
+ * constexpr_inline_storage: the same slots, default-initialised
+ * ============================================================================ */
+
+/**
+ * @brief `N` default-initialised slots for `T` held inside the storage object itself.
+ *
+ * `N` default constructors run every time one of these is built, which is the cost
+ * `inline_storage` exists to avoid. Per storage object, not per program: a move or
+ * a clone builds a destination and so pays it again, whatever the element count.
+ * That is the trade this storage exists to offer: a `T` whose default constructor is `constexpr` but not trivial (an
+ * aggregate with member initialisers, a user-provided `constexpr` constructor)
+ * gets a real `T[N]` and therefore constant evaluation, where `inline_storage`
+ * would fall back to raw bytes and lose it.
+ *
+ * Everything else matches `inline_storage`: same capacity, same alignment, same
+ * `sizeof`, no allocation, and neither copyable nor movable. For a trivially
+ * default constructible `T` the two are the same type in all but name, cost
+ * included.
+ *
+ * @code
+ *     struct vec2 { float x{}, y{}; };                   // not trivially default constructible
+ *     libmem::constexpr_inline_vector<vec2, 8> v{};      // constant-evaluable regardless
+ * @endcode
+ *
+ * @tparam T     Element type: default-initialisable, and trivially destructible so
+ *               that the slot array does not destroy what the container already did.
+ * @tparam N     Slot count.
+ * @tparam Align Alignment of the slot array; at least `alignof(T)`.
+ *
+ * @warning A `T` whose default constructor throws terminates rather than
+ *          propagating: a container over inline slots default-constructs them
+ *          inside a `noexcept` move.
+ * @note `rebind<U>` carries the same requirements on `U`, so a `sparse_map` over
+ *       this storage rejects a mapped type that is not default-initialisable.
+ */
+export template <typename T, std::size_t N, std::size_t Align = alignof(T)>
+    requires std::is_object_v<T> && (N > 0) && detail::valid_storage_alignment<T, Align> && detail::default_init_inline_slots<T>
+class constexpr_inline_storage {
+public:
+    using value_type = T;
+    using size_type = std::size_t;
+    template <typename U> using rebind = constexpr_inline_storage<U, N>;
+
+    static constexpr size_type static_capacity{N};
+    static constexpr size_type alignment{Align};
+    static constexpr bool relocatable{false};
+
+    /** @brief Whether this storage can be used during constant evaluation. */
+    static constexpr bool constexpr_usable{detail::constexpr_default_constructible<T>};
+
+    constexpr constexpr_inline_storage() noexcept(std::is_nothrow_default_constructible_v<T>) = default;
+
+    constexpr_inline_storage(const constexpr_inline_storage&) = delete;
+    constexpr_inline_storage& operator=(const constexpr_inline_storage&) = delete;
+    constexpr_inline_storage(constexpr_inline_storage&&) = delete;
+    constexpr_inline_storage& operator=(constexpr_inline_storage&&) = delete;
+
+    constexpr T* data() noexcept { return slots_.data(); }
+    constexpr const T* data() const noexcept { return slots_.data(); }
+
+    static constexpr size_type capacity() noexcept { return N; }
+
+private:
+    /* `true`, not the trait: asking for the typed array whatever `T` is, is the
+     * whole point of this storage. */
+    detail::inline_slots<T, N, Align, true> slots_;
 };
 
 /* ============================================================================
@@ -784,7 +880,7 @@ export template <growable_storage S> bool relocate_grow(S& store, const typename
     return true;
 }
 
-/* Concept verification across the four storage kinds. */
+/* Concept verification across the five storage kinds. */
 static_assert(storage_for<inline_storage<int, 8>, int>);
 static_assert(fixed_extent_storage<inline_storage<int, 8>>);
 static_assert(!growable_storage<inline_storage<int, 8>>);
@@ -822,6 +918,49 @@ static_assert(small_storage<int, 8>::rebind<std::size_t>::inline_capacity == 8);
 /* rebind keeps the injected resource and resets the alignment to the new type's. */
 static_assert(std::same_as<dynamic_storage<int, resource_ref<default_resource>>::rebind<char>, dynamic_storage<char, resource_ref<default_resource>>>);
 static_assert(dynamic_storage<std::max_align_t, default_resource, 64>::rebind<char>::alignment == alignof(char));
+
+namespace detail {
+
+/* Not trivially default constructible, so `inline_storage` gives it raw bytes and
+ * `constexpr_inline_storage` is the only way it reaches constant evaluation. */
+struct nsdmi_slot {
+    float x{}, y{};
+};
+
+/* Default-constructible, but not at compile time. */
+struct runtime_slot {
+    int v;
+
+    runtime_slot() : v{} {}
+};
+
+} // namespace detail
+
+static_assert(storage_for<constexpr_inline_storage<int, 8>, int>);
+static_assert(fixed_extent_storage<constexpr_inline_storage<int, 8>>);
+static_assert(!growable_storage<constexpr_inline_storage<int, 8>>);
+static_assert(!resourced_storage<constexpr_inline_storage<int, 8>>);
+static_assert(!constexpr_inline_storage<int, 8>::relocatable);
+static_assert(std::same_as<constexpr_inline_storage<int, 8>::rebind<char>, constexpr_inline_storage<char, 8>>);
+
+/* The opt-in changes what is constructed, never the layout. */
+static_assert(sizeof(constexpr_inline_storage<detail::nsdmi_slot, 64>) == 64 * sizeof(detail::nsdmi_slot));
+static_assert(alignof(constexpr_inline_storage<detail::nsdmi_slot, 8>) == alignof(detail::nsdmi_slot));
+static_assert(constexpr_inline_storage<detail::nsdmi_slot, 8, cache_line_size>::alignment == cache_line_size);
+
+/* What it costs, in the only terms that matter: the default constructions the
+ * element type itself implies, which for a trivial one is still none. */
+static_assert(std::is_trivially_default_constructible_v<constexpr_inline_storage<int, 8>>);
+static_assert(!std::is_trivially_default_constructible_v<constexpr_inline_storage<detail::nsdmi_slot, 8>>);
+static_assert(std::is_trivially_default_constructible_v<inline_storage<detail::nsdmi_slot, 8>>);
+
+/* What it buys, and the case it cannot rescue. */
+static_assert(!inline_storage<detail::nsdmi_slot, 8>::constexpr_usable);
+static_assert(constexpr_inline_storage<detail::nsdmi_slot, 8>::constexpr_usable);
+static_assert(!constexpr_inline_storage<detail::runtime_slot, 8>::constexpr_usable);
+/* A destructor to run is refused outright rather than reported: the slot array
+ * would run it over what the container already destroyed. */
+static_assert(!detail::default_init_inline_slots<std::string>);
 
 } // namespace libmem
 

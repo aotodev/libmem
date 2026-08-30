@@ -158,6 +158,23 @@ private:
 
 static_assert(libmem::aligned_memory_resource<limited_resource>);
 
+/* A payload that is default-constructible and trivially destructible but not
+ * trivially default constructible: the shape `constexpr_inline_storage` exists
+ * for. Counts its default constructions, so the opt-in cost is measurable. */
+struct default_counted {
+    static int defaults;
+
+    int value{-1};
+
+    default_counted() { ++defaults; }
+    explicit default_counted(const int v) : value{v} {}
+};
+
+int default_counted::defaults{};
+
+static_assert(!std::is_trivially_default_constructible_v<default_counted>);
+static_assert(std::is_trivially_destructible_v<default_counted>);
+
 /* ============================================================================
  * Concept surface
  * ============================================================================ */
@@ -240,6 +257,47 @@ TEST(InlineStorage, ConstructsNothingOnItsOwn) {
         std::destroy_at(store.data());
     }
     EXPECT_EQ(tracked::live, 0);
+}
+
+/* ============================================================================
+ * constexpr_inline_storage
+ * ============================================================================ */
+
+TEST(ConstexprInlineStorage, DefaultConstructsEverySlotWhereInlineStorageConstructsNone) {
+    default_counted::defaults = 0;
+    {
+        const libmem::inline_storage<default_counted, 8> untouched{};
+        EXPECT_EQ(untouched.capacity(), 8u);
+        EXPECT_EQ(default_counted::defaults, 0) << "the default storage still constructs nothing";
+    }
+
+    default_counted::defaults = 0;
+    {
+        libmem::constexpr_inline_storage<default_counted, 8> store{};
+        EXPECT_EQ(default_counted::defaults, 8) << "the opt-in pays N default constructions up front";
+        EXPECT_EQ(store.data()[7].value, -1) << "and the slots hold what the element type says they hold";
+
+        std::construct_at(store.data(), 42);
+        EXPECT_EQ(store.data()->value, 42);
+    }
+}
+
+TEST(ConstexprInlineStorage, MatchesInlineStorageEverywhereElse) {
+    libmem::constexpr_inline_storage<default_counted, 16> store{};
+
+    EXPECT_EQ(store.capacity(), 16u);
+    EXPECT_EQ(sizeof(store), 16u * sizeof(default_counted));
+
+    const auto* base{reinterpret_cast<const std::byte*>(&store)};
+    const auto* slots{reinterpret_cast<const std::byte*>(store.data())};
+    EXPECT_EQ(base, slots) << "slots should be the object's own bytes";
+}
+
+TEST(ConstexprInlineStorage, HonoursAnExplicitAlignment) {
+    libmem::constexpr_inline_storage<std::uint32_t, 8, libmem::cache_line_size> store{};
+
+    EXPECT_EQ(alignof(decltype(store)), libmem::cache_line_size);
+    EXPECT_EQ(reinterpret_cast<std::uintptr_t>(store.data()) % libmem::cache_line_size, 0u);
 }
 
 /* ============================================================================

@@ -94,7 +94,10 @@ public:
     static constexpr bool growable{growable_storage<Storage>};
     static constexpr bool relocatable{Storage::relocatable};
 
-    constexpr flat_sparse_index()
+    /* `fill_from` is noexcept, so the storage's own construction is the only thing
+     * here that can throw. Spelled out because a container's move constructor
+     * default-constructs one of these and reports its own noexcept from it. */
+    constexpr flat_sparse_index() noexcept(std::is_nothrow_default_constructible_v<Storage>)
         requires std::default_initializable<Storage>
     {
         fill_from(0);

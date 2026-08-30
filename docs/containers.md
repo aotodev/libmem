@@ -82,8 +82,11 @@ they had set. `std::vector<int>{4}` sets the same trap; the difference is that
 up much later as growth that was supposed to be bounded.
 
 Every container moves, inline-backed ones included, and every move is `noexcept`.
-Where the storage cannot transfer its slots the move relocates the elements and
-empties the source, exactly as `std::array` does. That costs O(size) rather than
+The one exception is a `constexpr_inline_storage` over an element type whose
+default constructor can throw: relocating builds the destination's slots, so that
+move is `noexcept` only where building them is, and it propagates rather than
+terminating. Where the storage cannot transfer its slots the move relocates the
+elements and empties the source, exactly as `std::array` does. That costs O(size) rather than
 O(1), which is what the container-level `relocatable` constant now reports: a cost,
 not an availability. Non-movable containers were a standing tax on generic code,
 so the only non-movable thing left is `spsc_ring`, deliberately, since a
@@ -247,6 +250,27 @@ destructible. `inline_storage` then holds a real
 lets that array be left trivially default-initialised inside a `constexpr`
 constructor, so nothing is zeroed at runtime and `sizeof` is unchanged.
 `inline_storage<T, N>::constexpr_usable` reports which branch a `T` takes.
+
+A `T` that is `constexpr` default-constructible but not *trivially* so, which is
+any type with a member initialiser or a user-provided `constexpr` constructor, is
+not shut out; it has to ask. `constexpr_inline_vector<T, N>`, or
+`constexpr_inline_storage<T, N>` under a sparse container, holds the same `T[N]`
+and default-initialises it:
+
+```cpp
+struct vec2 { float x{}, y{}; };
+
+constexpr float folded = [] {
+    libmem::constexpr_inline_vector<vec2, 8> v{};
+    v.push_back(vec2{1.0F, 2.0F});
+    return v[0].x + v[0].y;
+}();
+static_assert(folded == 3.0F);
+```
+
+The `N` default constructions that costs, on every such container built, moved or
+cloned, are why it is a separate name rather than a wider trait;
+[docs/storage.md](storage.md) has the trade in full.
 
 Raw bytes are the obstacle, not a missing keyword: `reinterpret_cast` is forbidden
 during constant evaluation, so a byte array can never be viewed as a `T*`. The

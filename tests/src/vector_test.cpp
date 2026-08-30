@@ -214,6 +214,50 @@ TEST(VectorConcepts, ANonTrivialElementFallsBackToBytesButStillWorks) {
     EXPECT_EQ(cloned[0], "hello");
 }
 
+TEST(VectorConcepts, ConstexprInlineVectorTakesTheElementsTheTraitExcludes) {
+    /* An aggregate with member initialisers is constexpr-constructible but not
+     * trivially so, which is exactly what the default storage turns away. */
+    struct point {
+        int x{}, y{};
+    };
+    static_assert(!libmem::inline_storage<point, 8>::constexpr_usable);
+    static_assert(libmem::constexpr_inline_storage<point, 8>::constexpr_usable);
+
+    constexpr int folded{[] {
+        libmem::constexpr_inline_vector<point, 8> v{};
+        v.push_back(point{10, 1});
+        v.push_back(point{20, 2});
+        v.emplace_back(30, 3);
+        v.erase(v.begin());
+
+        int sum{};
+        for (const point& p : v) {
+            sum += p.x;
+        }
+        return sum;
+    }()};
+    static_assert(folded == 50);
+    EXPECT_EQ(folded, 50);
+
+    /* Nothing but the initialisation changed: same layout, same bounded
+     * behaviour, same explicit copy. */
+    static_assert(sizeof(libmem::constexpr_inline_storage<point, 1024>) == 1024 * sizeof(point));
+    static_assert(!libmem::constexpr_inline_vector<point, 8>::growable);
+
+    libmem::constexpr_inline_vector<point, 2> v{};
+    ASSERT_NE(v.push_back(point{1, 2}), nullptr);
+    ASSERT_NE(v.push_back(point{3, 4}), nullptr);
+    EXPECT_EQ(v.push_back(point{5, 6}), nullptr) << "still reports full rather than growing";
+
+    const libmem::constexpr_inline_vector<point, 2> moved{std::move(v)};
+    EXPECT_EQ(moved.size(), 2u);
+    EXPECT_EQ(moved[1].y, 4);
+
+    const auto cloned{moved.clone()};
+    EXPECT_EQ(cloned.size(), 2u);
+    EXPECT_EQ(cloned[0].x, 1);
+}
+
 TEST(VectorConcepts, IsAContiguousRangeThroughConst) {
     static_assert(std::ranges::contiguous_range<libmem::vector<int>>);
     static_assert(std::ranges::contiguous_range<const libmem::vector<int>>);
