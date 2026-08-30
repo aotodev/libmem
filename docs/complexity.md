@@ -71,8 +71,11 @@ the array is never zeroed. A container that constant-evaluates costs exactly wha
 the same container costs at run time.
 
 `constexpr_inline_storage` is the one exception, and the reason it is opt-in rather
-than a wider trait: it default-initialises its slots, so construction runs `N`
+than a wider trait: it default-initialises its slots, so building one runs `N`
 default constructors where `inline_storage` runs none. `sizeof` and `alignof` are
-still identical, and every other operation still costs what it costs at run time.
+unchanged, but the `N` is per storage object, not per program: a move and a clone
+each build a destination and so each pay it again, whatever the element count. A
+1024-slot vector holding two elements runs 1024 default constructors to be
+constructed, 1024 more to be moved, and 1024 more to be cloned.
 
 See [containers.md](containers.md#constant-evaluation) for which containers qualify.

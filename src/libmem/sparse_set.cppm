@@ -239,11 +239,14 @@ public:
     /**
      * @brief Inline-backed set: the sparse index drains and the dense ids are relocated one at a time.
      *
-     * @note Requires a non-throwing id move, which keeps every move `noexcept` and
-     *       leaves no half-moved state to unwind: the sparse index is drained in
-     *       the mem-initialiser, before the dense ids are touched.
+     * @note Requires a non-throwing id move, which leaves no half-moved state to
+     *       unwind: the sparse index is drained in the mem-initialiser, before the
+     *       dense ids are touched.
+     * @note The dense slots are default-constructed here, so the move is `noexcept`
+     *       only where that construction is; see `constexpr_inline_storage`, the
+     *       one storage for which it may not be.
      */
-    constexpr sparse_set(sparse_set&& other) noexcept
+    constexpr sparse_set(sparse_set&& other) noexcept(std::is_nothrow_default_constructible_v<DenseStorage>)
         requires(!relocatable) && std::default_initializable<SparseIndex> && std::default_initializable<DenseStorage> &&
                 std::is_nothrow_move_constructible_v<Id>
         : sparse_{std::move(other.sparse_)} {
@@ -675,11 +678,15 @@ public:
     /**
      * @brief Inline-backed map: the payloads are relocated one at a time.
      *
-     * @note Requires a non-throwing payload move, so the move stays `noexcept` and
-     *       leaves no half-moved state. The payloads are relocated *before* the key
-     *       set is moved, so `other.size()` still describes them while they travel.
+     * @note Requires a non-throwing payload move, so nothing is left half-moved.
+     *       The payloads are relocated *before* the key set is moved, so
+     *       `other.size()` still describes them while they travel.
+     * @note Both arrays are default-constructed here, so the move is `noexcept`
+     *       only where those constructions are; see `constexpr_inline_storage`, the
+     *       one storage for which they may not be.
      */
-    constexpr sparse_map(sparse_map&& other) noexcept
+    constexpr sparse_map(sparse_map&& other) noexcept(
+        std::is_nothrow_default_constructible_v<key_set> && std::is_nothrow_default_constructible_v<value_storage>)
         requires(!relocatable) && std::default_initializable<key_set> && std::default_initializable<value_storage> && std::is_nothrow_move_constructible_v<T> &&
                 std::movable<key_set>
     {
@@ -1095,6 +1102,11 @@ consteval float constexpr_default_init_map() {
 static_assert(constexpr_set() == 8);
 static_assert(constexpr_map() == 20);
 static_assert(constexpr_default_init_map() == 7.0F);
+
+/* The dense slots and the payloads are default-constructed by the move, so a map
+ * over the opt-in storage keeps its `noexcept` move only while those cannot throw. */
+static_assert(std::is_nothrow_move_constructible_v<constexpr_inline_map>);
+static_assert(std::is_nothrow_move_constructible_v<inline_map>);
 
 template <typename S>
 concept has_clone = requires(const S& s) { s.clone(); };

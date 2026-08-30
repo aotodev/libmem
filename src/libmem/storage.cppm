@@ -420,9 +420,10 @@ private:
 /**
  * @brief `N` default-initialised slots for `T` held inside the storage object itself.
  *
- * `N` default constructors run when the storage is built, which is the cost
- * `inline_storage` exists to avoid. That is the trade this storage exists to
- * offer: a `T` whose default constructor is `constexpr` but not trivial (an
+ * `N` default constructors run every time one of these is built, which is the cost
+ * `inline_storage` exists to avoid. Per storage object, not per program: a move or
+ * a clone builds a destination and so pays it again, whatever the element count.
+ * That is the trade this storage exists to offer: a `T` whose default constructor is `constexpr` but not trivial (an
  * aggregate with member initialisers, a user-provided `constexpr` constructor)
  * gets a real `T[N]` and therefore constant evaluation, where `inline_storage`
  * would fall back to raw bytes and lose it.

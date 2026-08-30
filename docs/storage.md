@@ -78,8 +78,10 @@ libmem::inline_vector<vec2, 8> plain{};              // raw bytes, run time only
 libmem::constexpr_inline_vector<vec2, 8> folded{};   // vec2[8], constant-evaluable
 ```
 
-The cost is `N` default constructions when the storage is built, for slots nobody
-has used yet, which is the work `inline_storage` exists to avoid. Hence a separate
+The cost is `N` default constructions every time a storage is built, for slots
+nobody has used yet, which is the work `inline_storage` exists to avoid. Every
+storage object pays it, so a move and a clone each pay it again over the
+destination's slots, independently of how many elements are live. Hence a separate
 name rather than a relaxed trait: worth paying when it is asked for, not worth
 paying silently. Capacity, alignment and `sizeof` are unchanged, and for a
 trivially default constructible `T` the two are the same thing in all but name.

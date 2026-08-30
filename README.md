@@ -53,7 +53,8 @@ libmem::small_vector<hit, 8> hits{};                 // allocates nothing until 
 `reserve` returns `bool`, and nothing throws `std::bad_alloc`. No container is
 implicitly copyable either, since a copy constructor could not report the
 failure; copying is explicit through `clone()` and `try_clone()`. Everything
-moves, inline buffers included, and every move is `noexcept`. See
+moves, inline buffers included, and every move is `noexcept` unless the element
+type's own default constructor can throw. See
 [docs/containers.md](docs/containers.md).
 
 **The inline containers work at compile time.** `inline_vector`, `sparse_set`
@@ -61,7 +62,7 @@ and `sparse_map` over inline storage constant-evaluate end to end for trivially
 default-constructible and trivially destructible element types, at no cost in
 size or alignment. `constexpr_inline_vector` opts an element type whose default
 constructor is `constexpr` but not trivial into the same thing, for the price of
-running it once per slot.
+running it once per slot on every such vector built, moved or cloned.
 
 **It interoperates both ways.** A `std::pmr::polymorphic_allocator` can back a
 libmem container, and `resource_allocator` turns any libmem resource into a

@@ -22,7 +22,10 @@
  *
  * @section vector_moves Moving and copying
  *
- * Every variant moves, and every move is `noexcept`. A `relocatable` storage
+ * Every variant moves, and every move is `noexcept` where the storage can be
+ * default-constructed without throwing, which is every storage but a
+ * `constexpr_inline_storage` over an element whose own default constructor can
+ * throw. A `relocatable` storage
  * transfers its buffer; otherwise the elements are relocated into the
  * destination's own slots and the source is emptied. The `relocatable` constant
  * reports which of the two happens, not whether a move is available.
@@ -164,11 +167,15 @@ public:
      * this object's own slots and the source is emptied. It is what `std::array`
      * does, and it is what keeps every vector usable in generic code.
      *
-     * @note Requires a non-throwing element move, so that every vector's move is
-     *       `noexcept` and a `std::vector<basic_vector<...>>` reallocates by moving
-     *       rather than falling back to copying.
+     * @note Requires a non-throwing element move, so that a
+     *       `std::vector<basic_vector<...>>` reallocates by moving rather than
+     *       falling back to copying.
+     * @note The destination's slots are default-constructed here, so the move is
+     *       `noexcept` only where the storage's own default construction is. Every
+     *       storage but `constexpr_inline_storage` is unconditionally nothrow, and
+     *       that one only when its element type is.
      */
-    constexpr basic_vector(basic_vector&& other) noexcept
+    constexpr basic_vector(basic_vector&& other) noexcept(std::is_nothrow_default_constructible_v<Storage>)
         requires(!Storage::relocatable) && std::default_initializable<Storage> && std::is_nothrow_move_constructible_v<value_type>
     {
         take_over(other);
@@ -589,7 +596,8 @@ static_assert(std::same_as<std::ranges::range_reference_t<vector<int>>, int&>);
 static_assert(std::same_as<std::ranges::range_reference_t<const vector<int>>, const int&>);
 static_assert(std::constructible_from<vector<int>, std::from_range_t, std::span<const int>>);
 
-/* Every variant moves, including the inline ones, and every move is noexcept so
+/* Every variant moves, including the inline ones, and every move over a
+ * nothrow-default-constructible storage is noexcept so
  * generic code relocates by moving rather than falling back to copying. */
 static_assert(std::movable<vector<int>>);
 static_assert(std::movable<small_vector<int, 8>>);
@@ -730,6 +738,17 @@ static_assert(std::movable<inline_vector<std::string, 4>>);
  * out either way, since the slot array would run it a second time. */
 static_assert(!inline_storage<detail::nsdmi_point, 8>::constexpr_usable);
 static_assert(constexpr_inline_storage<detail::nsdmi_point, 8>::constexpr_usable);
+
+/* The move relocates into slots it default-constructs, so it is `noexcept` exactly
+ * where that construction is. `summed` has a user-provided constructor with no
+ * exception specification, which is the common shape and is potentially-throwing;
+ * the move must report that rather than promise `noexcept` and terminate. */
+static_assert(std::is_nothrow_default_constructible_v<detail::nsdmi_point>);
+static_assert(!std::is_nothrow_default_constructible_v<detail::summed>);
+static_assert(std::is_nothrow_move_constructible_v<constexpr_inline_vector<detail::nsdmi_point, 8>>);
+static_assert(!std::is_nothrow_move_constructible_v<constexpr_inline_vector<detail::summed, 4>>);
+/* Movable either way: the narrowing costs the promise, never the operation. */
+static_assert(std::movable<constexpr_inline_vector<detail::summed, 4>>);
 
 namespace detail {
 

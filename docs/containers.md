@@ -82,8 +82,11 @@ they had set. `std::vector<int>{4}` sets the same trap; the difference is that
 up much later as growth that was supposed to be bounded.
 
 Every container moves, inline-backed ones included, and every move is `noexcept`.
-Where the storage cannot transfer its slots the move relocates the elements and
-empties the source, exactly as `std::array` does. That costs O(size) rather than
+The one exception is a `constexpr_inline_storage` over an element type whose
+default constructor can throw: relocating builds the destination's slots, so that
+move is `noexcept` only where building them is, and it propagates rather than
+terminating. Where the storage cannot transfer its slots the move relocates the
+elements and empties the source, exactly as `std::array` does. That costs O(size) rather than
 O(1), which is what the container-level `relocatable` constant now reports: a cost,
 not an availability. Non-movable containers were a standing tax on generic code,
 so the only non-movable thing left is `spsc_ring`, deliberately, since a
@@ -265,8 +268,9 @@ constexpr float folded = [] {
 static_assert(folded == 3.0F);
 ```
 
-The `N` default constructions that costs are why it is a separate name rather than
-a wider trait; [docs/storage.md](storage.md) has the trade in full.
+The `N` default constructions that costs, on every such container built, moved or
+cloned, are why it is a separate name rather than a wider trait;
+[docs/storage.md](storage.md) has the trade in full.
 
 Raw bytes are the obstacle, not a missing keyword: `reinterpret_cast` is forbidden
 during constant evaluation, so a byte array can never be viewed as a `T*`. The
