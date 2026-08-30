@@ -7,7 +7,11 @@
 # supports: ubuntu/debian, arch, fedora, gentoo, macos (homebrew)
 # ---------------------------------------------------------------------------------------
 
-# Guard against toolchain re-entry (CMake processes this file multiple times)
+# Guard against toolchain re-entry (CMake processes this file multiple times).
+# Normal variable, never CACHE: a cached guard survives into the next cmake run over
+# the same build dir, and this file then no-ops and leaves CMAKE_CXX_COMPILER unset.
+# Any run that re-detects the compiler (a cmake upgrade does) then falls back to
+# /usr/bin/c++ while the cached flags still say -stdlib=libc++.
 if(_LLVM_TOOLCHAIN_RESOLVED)
     return()
 endif()
@@ -171,9 +175,8 @@ unset(_LIBCXX_HEADER)
 unset(_LIBCXX_LIBRARY)
 
 # ---------------------------------------------------------------------------------------
-# mark resolved so re-entry is a no-op
+# mark resolved so re-entry within this run is a no-op; see the guard at the top
 # ---------------------------------------------------------------------------------------
-set(_LLVM_TOOLCHAIN_RESOLVED TRUE CACHE INTERNAL
-    "LLVM toolchain has been configured; skip on re-entry.")
+set(_LLVM_TOOLCHAIN_RESOLVED TRUE)
 
 message(STATUS "[LLVM Toolchain] Fully resolved: all tools from LLVM ${_LLVM_MAJOR_VERSION}")

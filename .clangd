@@ -1,0 +1,24 @@
+CompileFlags:
+  # A clang database, and a separate one: scripts/make.sh reuses build/ for both
+  # compilers, and clangd cannot read gcc's module flags at all.
+  #
+  # Built, not just configured: the commands carry explicit -fmodule-file= paths, and
+  # clangd cannot produce the std BMI on its own (its scan of libc++'s std.cppm fails
+  # on the operator""d in chrono.inc). Rebuild after editing a .cppm, or the editor
+  # reads the previous BMI:
+  #   ./scripts/make.sh --clangd
+  CompilationDatabase: build-clangd
+
+  # Only reached if this ever points at a gcc database; clang rejects these outright.
+  Remove:
+    - -fmodules-ts
+    - -fmodule-mapper=*
+    - -fdeps-format=*
+    - -mabi=*
+    - -mno=*
+    - -Wnrvo
+    # Otherwise a clang-only warning arrives in the editor as a red error.
+    - -Werror
+
+Diagnostics:
+  UnusedIncludes: None

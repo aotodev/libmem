@@ -234,27 +234,6 @@ target_sources(${PROJECT_NAME}
 )
 
 # ---------------------------------------------------------------------------------------
-# Symlink compile_commands.json to the source root for tooling. Top-level only:
-# CMAKE_SOURCE_DIR is the parent's root when embedded.
-# ---------------------------------------------------------------------------------------
-if(PROJECT_IS_TOP_LEVEL)
-    if(UNIX)
-        execute_process(
-            COMMAND ${CMAKE_COMMAND} -E create_symlink
-                ${CMAKE_BINARY_DIR}/compile_commands.json
-                ${CMAKE_SOURCE_DIR}/compile_commands.json
-        )
-    else()
-        add_custom_target(copy-compile-commands ALL
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${CMAKE_BINARY_DIR}/compile_commands.json
-                ${CMAKE_SOURCE_DIR}/compile_commands.json
-            COMMENT "Copying compile_commands.json to source directory"
-        )
-    endif()
-endif()
-
-# ---------------------------------------------------------------------------------------
 # Tests. Top-level only: a consumer must not get our suites, and `unit_tests` would
 # collide with theirs.
 # ---------------------------------------------------------------------------------------
