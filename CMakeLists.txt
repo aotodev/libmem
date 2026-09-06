@@ -169,10 +169,8 @@ target_compile_options(libmem_project_flags INTERFACE
     -Wsign-conversion
     -Wold-style-cast
     -Wuninitialized
-    -Wself-move
-    -Wpessimizing-move
-    -Wredundant-move
-    # Not in -Wall on either compiler. It is what keeps the try_clone family single-exit.
+    # Not implied by -Wall -Wextra on either compiler, unlike the rest of the move
+    # family. It is what keeps the try_clone family single-exit.
     -Wnrvo
     -Werror
     # No -Wundef: it makes libstdc++'s bits/std.cc fail to scan, so nothing builds.
