@@ -1,0 +1,38 @@
+# Build + run the test suite with clang at -std=gnu++26, the dialect a default-configured
+# consumer gets: libmem no longer pins CXX_EXTENSIONS on its target.
+name: clang gnu++26
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'cmake/**'
+      - '**/CMakeLists.txt'
+      - '.github/workflows/clang-gnu.yml'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/aotodev/libmem-ci:latest
+    env:
+      ASAN_OPTIONS: detect_leaks=1
+      UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure, build and test
+        run: |
+          CXX=clang++ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Debug \
+            -DLIBMEM_BUILD_TESTS=ON -DCMAKE_CXX_EXTENSIONS=ON
+          cmake --build build -j
+          ctest --test-dir build --output-on-failure
