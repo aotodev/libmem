@@ -11,7 +11,7 @@ include(FetchContent)
 FetchContent_Declare(
     libmem
     GIT_REPOSITORY https://github.com/aotodev/libmem.git
-    GIT_TAG v0.9.0
+    GIT_TAG v0.9.1
     SYSTEM
 )
 FetchContent_MakeAvailable(libmem)
