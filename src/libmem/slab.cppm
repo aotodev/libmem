@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file slab.cppm
  * @brief Fixed-size block slab allocator with compile-time bitmap sizing.

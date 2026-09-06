@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file storage.cppm
  * @brief Raw element storage: the layer every libmem container builds its buffer on.

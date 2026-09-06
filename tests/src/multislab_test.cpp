@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file multislab_test.cpp
  * @brief Tests for `libmem::multislab`: lazy growth, max-slab caps,

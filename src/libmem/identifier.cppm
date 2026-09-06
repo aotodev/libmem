@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file identifier.cppm
  * @brief Concepts and CPOs for types usable as an array index: id traits, null sentinel, `to_index`.

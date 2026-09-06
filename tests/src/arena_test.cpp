@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file arena_test.cpp
  * @brief Tests for `libmem::arena`: owning/borrowed buffers, alignment,

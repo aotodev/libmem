@@ -120,3 +120,7 @@ than a guarantee of exhaustive coverage. Details in
 - [Complexity](docs/complexity.md): cost tables for every component.
 - [Testing](docs/testing.md): what the suites and fuzzers actually cover.
 - [Integration](docs/integration.md): consuming libmem from another CMake project.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

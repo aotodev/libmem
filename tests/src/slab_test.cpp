@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file slab_test.cpp
  * @brief Tests for `libmem::slab`: allocation, exhaustion, reuse, reset,

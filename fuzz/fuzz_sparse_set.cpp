@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file fuzz_sparse_set.cpp
  * @brief Coverage-guided differential fuzzer for `libmem::sparse_set`.

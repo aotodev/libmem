@@ -264,6 +264,9 @@ if(LIBMEM_INSTALL)
     install(FILES cmake/enable_standard_modules.cmake
         DESTINATION "${LIBMEM_INSTALL_CMAKEDIR}")
 
+    # MIT asks for the notice to travel with copies; a package is a copy.
+    install(FILES LICENSE DESTINATION "${CMAKE_INSTALL_DOCDIR}")
+
     configure_package_config_file(
         cmake/libmemConfig.cmake.in
         "${CMAKE_CURRENT_BINARY_DIR}/libmemConfig.cmake"

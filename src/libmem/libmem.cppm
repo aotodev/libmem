@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file libmem.cppm
  * @brief Umbrella module for the libmem allocator and container library.

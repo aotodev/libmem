@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file concepts.cppm
  * @brief Shared concepts, policies, and platform constants for libmem.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file sparse_set.cppm
  * @brief Dense-packed id set and id-keyed map with O(1) insert, erase, and lookup.

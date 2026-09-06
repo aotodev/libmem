@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file allocator.cppm
  * @brief Standard-Allocator adapter over a libmem `memory_resource`.

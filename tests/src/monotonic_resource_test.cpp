@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file monotonic_resource_test.cpp
  * @brief Tests for `enable_monotonic_resource` and the `monotonic_resource` /

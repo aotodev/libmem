@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file typed_arena.cppm
  * @brief Bump allocator with destructor tracking for non-trivially-destructible types.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file fuzz_multislab.cpp
  * @brief Coverage-guided fuzzer for `libmem::multislab`.

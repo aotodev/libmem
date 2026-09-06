@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file sparse_index.cppm
  * @brief The sparse half of a sparse set: id subscript -> dense position, flat or paged.

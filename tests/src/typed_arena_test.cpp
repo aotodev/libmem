@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file typed_arena_test.cpp
  * @brief Tests for `libmem::typed_arena`: non-trivially-destructible types,

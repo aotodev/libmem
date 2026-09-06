@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file arena.cppm
  * @brief Linear/scratch arena allocator (a.k.a. bump or region allocator).

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file multislab.cppm
  * @brief Auto-expanding multi-slab allocator with hysteresis-based shrinking.

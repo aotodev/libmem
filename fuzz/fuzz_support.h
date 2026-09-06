@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file fuzz_support.h
  * @brief Shared plumbing for the libFuzzer harnesses.

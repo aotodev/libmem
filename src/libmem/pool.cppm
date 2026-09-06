@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file pool.cppm
  * @brief Pointer-stable, unordered typed container built on top of `multislab`.

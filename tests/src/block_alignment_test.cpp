@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file block_alignment_test.cpp
  * @brief Block geometry: `multislab` honours its `BlockAlign`, `pool<T>` honours `alignof(T)`,

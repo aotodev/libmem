@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file vector.cppm
  * @brief Contiguous growable sequence over a `storage`, including the small-buffer variant.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file pool_test.cpp
  * @brief Smoke tests for `libmem::pool`: insertion stability,

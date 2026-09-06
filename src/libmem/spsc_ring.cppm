@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Aoto
+// SPDX-License-Identifier: MIT
 /**
  * @file spsc_ring.cppm
  * @brief Lock-free single-producer single-consumer ring buffer with cached indices.
