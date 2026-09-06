@@ -21,3 +21,12 @@ target_link_libraries(unit_tests PRIVATE libmem libmem_project_flags libmem_sani
 
 include(GoogleTest)
 gtest_discover_tests(unit_tests)
+
+# Runs wherever nm exists; skipped rather than failed when it does not.
+find_program(NM_EXECUTABLE nm)
+if(NM_EXECUTABLE)
+    add_test(NAME abi_surface COMMAND ${CMAKE_COMMAND}
+        -DNM=${NM_EXECUTABLE}
+        -DLIB=$<TARGET_FILE:libmem>
+        -P ${PROJECT_SOURCE_DIR}/cmake/check_abi_surface.cmake)
+endif()
