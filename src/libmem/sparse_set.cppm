@@ -492,8 +492,9 @@ public:
             copy.emplace(copy_of_t{}, *this);
         }
 
+        // reset, not `return std::nullopt`: a second return statement defeats NRVO.
         if (copy->size() != size_) {
-            return std::nullopt;
+            copy.reset();
         }
         return copy;
     }
@@ -949,8 +950,9 @@ public:
             copy.emplace(copy_of_t{}, *this);
         }
 
+        // reset, not `return std::nullopt`: a second return statement defeats NRVO.
         if (copy->size() != size()) {
-            return std::nullopt;
+            copy.reset();
         }
         return copy;
     }

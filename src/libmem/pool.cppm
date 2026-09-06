@@ -432,8 +432,9 @@ public:
     {
         std::optional<pool> copy{std::in_place, slab_limit{pool_.max_slabs()}, pool_.resource(), pool_.policy()};
 
+        // reset, not `return std::nullopt`: a second return statement defeats NRVO.
         if (copy->insert_range(*this) != size_) {
-            return std::nullopt;
+            copy.reset();
         }
         return copy;
     }
