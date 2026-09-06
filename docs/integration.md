@@ -64,13 +64,16 @@ flags, which is what keeps the std module consistent across the two.
 Compatibility is `SameMinorVersion`. Pre-1.0 a minor bump is a break, so `0.9`
 accepts 0.9.x and rejects 0.10.
 
-### What an install currently supports
+### Static and shared
 
-Static only. A top-level build hides symbols and no entity is annotated
-`LIBMEM_EXPORT` yet, so an installed `.so` exports module initializers and nothing
-else; configuring `BUILD_SHARED_LIBS=ON` with `LIBMEM_INSTALL=ON` warns about it.
-Embedded shared builds are fine, because libmem does not set the visibility preset
-when it is not top level.
+Both install, and static is the default. The shipped binary is small either way:
+26 functions from `arena`, `typed_arena` and `default_resource`, plus one
+initializer per module. Everything else in libmem is a template and is compiled in
+your tree.
+
+Those symbols are module-attached (`arena@libmem` in the mangling), which is new
+ABI ground on both compilers, and pre-1.0 the soname carries `major.minor` because
+a minor bump is free to break it. Prefer static unless you have a reason not to.
 
 Do not install a `Release` build unless the consumer also links with LTO. `Release`
 adds `-flto`, which makes `liblibmem.a` an LLVM bitcode archive, and a plain link
@@ -84,6 +87,10 @@ When libmem is not the top-level project it does not touch the global
 `compile_commands.json`, or build its own tests and fuzzers. The library target
 carries its own `CXX_STANDARD` / `CXX_MODULE_STD` properties, so it compiles
 correctly regardless.
+
+Symbol visibility is the parent's too: libmem sets no visibility preset, because
+visibility is a property of the final linked binary and every consumption path
+compiles the module interfaces in the consumer's tree.
 
 That deliberately leaves **global codegen policy to the parent**. `import std;`
 builds the std module BMI from whatever flags a target uses, so the consumer should

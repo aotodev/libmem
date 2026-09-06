@@ -75,10 +75,6 @@ if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_CXX_MODULE_STD ON)
     set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
-    # Default to hidden visibility; shared builds export via LIBMEM_EXPORT
-    set(CMAKE_CXX_VISIBILITY_PRESET hidden)
-    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-
     # Disable RTTI: not needed, and reduces binary size
     add_compile_options(-fno-rtti)
 
@@ -146,21 +142,6 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_EXTENSIONS OFF
     CXX_MODULE_STD ON
     CXX_SCAN_FOR_MODULES ON
-)
-
-# ---------------------------------------------------------------------------------------
-# Symbol visibility / export macros
-# ---------------------------------------------------------------------------------------
-if(BUILD_SHARED_LIBS)
-    target_compile_definitions(${PROJECT_NAME} PUBLIC LIBMEM_SHARED)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE LIBMEM_BUILDING)
-endif()
-
-target_sources(${PROJECT_NAME}
-  PUBLIC
-    FILE_SET HEADERS
-      BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
-      FILES include/libmem/export.h
 )
 
 # ---------------------------------------------------------------------------------------
@@ -259,22 +240,15 @@ if(LIBMEM_INSTALL)
 
     set(LIBMEM_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/libmem")
 
-    # Top-level builds hide symbols and nothing is annotated LIBMEM_EXPORT, so the
-    # installed .so exports only module initializers.
-    if(BUILD_SHARED_LIBS)
-        message(WARNING "[libmem] a shared install exports no usable symbols; install the static build")
-    endif()
-
-    # cmake-lint reads the two FILE_SET DESTINATIONs as a duplicate keyword; it
-    # predates FILE_SET, and cmake rejects splitting the call ("not all of its
-    # interface file sets are installed").
+    # cmake-lint predates FILE_SET and reads its DESTINATION as a duplicate
+    # keyword; cmake rejects splitting the call ("not all of its interface file
+    # sets are installed").
     # cmake-lint: disable=E1122
     install(TARGETS ${PROJECT_NAME} libmem_project_flags libmem_sanitizers
         EXPORT libmem-targets
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
-        FILE_SET HEADERS DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
         # Module interfaces install as sources: the consumer builds their own BMIs.
         FILE_SET CXX_MODULES DESTINATION "${CMAKE_INSTALL_DATADIR}/libmem/modules"
     )
