@@ -46,6 +46,8 @@ namespace libmem {
  * `allocate_n`). The allocator can either own its buffer (heap-allocated via
  * `operator new[]`) or wrap a user-supplied buffer.
  */
+// Every non-template definition below carries explicit inline: without it the
+// definition lands in libmem's TU and becomes ABI.
 export class arena {
 public:
     /* ========================================================================
@@ -70,7 +72,7 @@ public:
      * @param align Alignment applied to untyped `allocate(n)` calls that do
      *              not pass an explicit alignment.
      */
-    explicit arena(const std::size_t size, const std::size_t align = default_alignment)
+    inline explicit arena(const std::size_t size, const std::size_t align = default_alignment)
         : begin_{new std::byte[size]}, end_{begin_ + size}, cursor_{begin_}, default_alignment_{align}, owns_buffer_{true} {
         assert(size > 0);
         assert(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
@@ -95,7 +97,7 @@ public:
         return *this;
     }
 
-    ~arena() { release(); }
+    inline ~arena() { release(); }
 
     /* ========================================================================
      * Untyped allocation interface (also satisfies `memory_resource`)
@@ -105,7 +107,7 @@ public:
      * @brief Bump-allocate `bytes` with `alignment`.
      * @return Pointer to the freshly bumped region, or `nullptr` if exhausted.
      */
-    [[nodiscard]] void* allocate(const std::size_t bytes, const std::size_t alignment) noexcept {
+    [[nodiscard]] inline void* allocate(const std::size_t bytes, const std::size_t alignment) noexcept {
         assert(alignment > 0 && (alignment & (alignment - 1)) == 0 && "alignment must be a power of two");
 
         const auto current{reinterpret_cast<std::uintptr_t>(cursor_)};
@@ -119,16 +121,16 @@ public:
     }
 
     /** @brief `memory_resource`-compatible allocate using the default alignment. */
-    [[nodiscard]] void* allocate(const std::size_t bytes) noexcept { return allocate(bytes, default_alignment_); }
+    [[nodiscard]] inline void* allocate(const std::size_t bytes) noexcept { return allocate(bytes, default_alignment_); }
 
     /**
      * @brief No-op deallocation, required by `memory_resource`; the cursor
      *        only moves backwards via `reset()`.
      */
-    void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
+    inline void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
 
     /** @brief No-op aligned deallocation, completing `aligned_memory_resource`. */
-    void deallocate(void* /*ptr*/, const std::size_t /*bytes*/, const std::size_t /*alignment*/) noexcept {}
+    inline void deallocate(void* /*ptr*/, const std::size_t /*bytes*/, const std::size_t /*alignment*/) noexcept {}
 
     /* ========================================================================
      * Typed allocation interface
@@ -213,7 +215,7 @@ private:
     std::size_t default_alignment_{default_alignment};
     bool owns_buffer_{false};
 
-    void release() noexcept {
+    inline void release() noexcept {
         if (owns_buffer_ && begin_) {
             delete[] begin_;
         }

@@ -145,12 +145,14 @@ concept aligned_monotonic_resource = aligned_memory_resource<T> && monotonic_res
 /**
  * @brief Default memory resource using global `operator new` / `operator delete`.
  */
+// Every non-template definition below carries explicit inline: without it the
+// definition lands in libmem's TU and becomes ABI.
 export struct default_resource {
-    void* allocate(const std::size_t size) { return ::operator new(size); }
-    void deallocate(void* ptr, const std::size_t size) noexcept { ::operator delete(ptr, size); }
+    inline void* allocate(const std::size_t size) { return ::operator new(size); }
+    inline void deallocate(void* ptr, const std::size_t size) noexcept { ::operator delete(ptr, size); }
 
-    void* allocate(const std::size_t size, const std::size_t align) { return ::operator new(size, std::align_val_t{align}); }
-    void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept { ::operator delete(ptr, size, std::align_val_t{align}); }
+    inline void* allocate(const std::size_t size, const std::size_t align) { return ::operator new(size, std::align_val_t{align}); }
+    inline void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept { ::operator delete(ptr, size, std::align_val_t{align}); }
 };
 
 static_assert(aligned_memory_resource<default_resource>);

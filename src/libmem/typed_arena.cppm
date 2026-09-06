@@ -47,6 +47,8 @@ namespace libmem {
  * Trivially-destructible types incur no extra overhead; the destructor
  * chain is bypassed entirely.
  */
+// Every non-template definition below carries explicit inline: without it the
+// definition lands in libmem's TU and becomes ABI.
 export class typed_arena {
 public:
     /* ========================================================================
@@ -67,7 +69,7 @@ public:
      * @param size  Buffer size in bytes (must be > 0).
      * @param align Default alignment for untyped allocations.
      */
-    explicit typed_arena(const std::size_t size, const std::size_t align = default_alignment)
+    inline explicit typed_arena(const std::size_t size, const std::size_t align = default_alignment)
         : begin_{new std::byte[size]}, end_{begin_ + size}, cursor_{begin_}, default_alignment_{align}, owns_buffer_{true} {
         assert(size > 0);
         assert(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
@@ -95,7 +97,7 @@ public:
         return *this;
     }
 
-    ~typed_arena() {
+    inline ~typed_arena() {
         destroy_all();
         release();
     }
@@ -110,7 +112,7 @@ public:
      * @note Raw allocations are not tracked; the caller is responsible for
      *       any required cleanup.
      */
-    [[nodiscard]] void* allocate(const std::size_t bytes, const std::size_t alignment) noexcept {
+    [[nodiscard]] inline void* allocate(const std::size_t bytes, const std::size_t alignment) noexcept {
         assert(alignment > 0 && (alignment & (alignment - 1)) == 0 && "alignment must be a power of two");
 
         const auto current{reinterpret_cast<std::uintptr_t>(cursor_)};
@@ -124,13 +126,13 @@ public:
     }
 
     /** @brief `memory_resource`-compatible allocate using the default alignment. */
-    [[nodiscard]] void* allocate(const std::size_t bytes) noexcept { return allocate(bytes, default_alignment_); }
+    [[nodiscard]] inline void* allocate(const std::size_t bytes) noexcept { return allocate(bytes, default_alignment_); }
 
     /** @brief No-op deallocation, required by `memory_resource`. */
-    void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
+    inline void deallocate(void* /*ptr*/, const std::size_t /*bytes*/) noexcept {}
 
     /** @brief No-op aligned deallocation, completing `aligned_memory_resource`. */
-    void deallocate(void* /*ptr*/, const std::size_t /*bytes*/, const std::size_t /*alignment*/) noexcept {}
+    inline void deallocate(void* /*ptr*/, const std::size_t /*bytes*/, const std::size_t /*alignment*/) noexcept {}
 
     /* ========================================================================
      * Typed allocation interface: supports ALL object types
@@ -200,7 +202,7 @@ public:
      * @brief Call all registered destructors in reverse order, then reset
      *        the cursor. The backing buffer is preserved for reuse.
      */
-    void reset() noexcept {
+    inline void reset() noexcept {
         destroy_all();
         cursor_ = begin_;
     }
@@ -250,14 +252,14 @@ private:
     destructor_node* dtor_head_{};
 
     /** @brief Walk the destructor chain in LIFO order. */
-    void destroy_all() noexcept {
+    inline void destroy_all() noexcept {
         for (destructor_node* node{dtor_head_}; node; node = node->next) {
             node->destroy(node->ptr);
         }
         dtor_head_ = nullptr;
     }
 
-    void release() noexcept {
+    inline void release() noexcept {
         if (owns_buffer_ && begin_) {
             delete[] begin_;
         }

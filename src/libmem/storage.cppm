@@ -928,10 +928,12 @@ struct nsdmi_slot {
 };
 
 /* Default-constructible, but not at compile time. */
+// Every non-template definition below carries explicit inline: without it the
+// definition lands in libmem's TU and becomes ABI.
 struct runtime_slot {
     int v;
 
-    runtime_slot() : v{} {}
+    inline runtime_slot() : v{} {}
 };
 
 } // namespace detail

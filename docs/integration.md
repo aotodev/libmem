@@ -66,14 +66,15 @@ accepts 0.9.x and rejects 0.10.
 
 ### Static and shared
 
-Both install, and static is the default. The shipped binary is small either way:
-26 functions from `arena`, `typed_arena` and `default_resource`, plus one
-initializer per module. Everything else in libmem is a template and is compiled in
-your tree.
+Both install, and static is the default.
 
-Those symbols are module-attached (`arena@libmem` in the mangling), which is new
-ABI ground on both compilers, and pre-1.0 the soname carries `major.minor` because
-a minor bump is free to break it. Prefer static unless you have a reason not to.
+The installed binary holds one initializer per module and nothing else. Every
+entity libmem exports is a template or an explicitly `inline` function, so all of
+it compiles in your tree under your flags: a consumer building with ASan
+instruments libmem's allocators too, which a prebuilt archive silently prevents.
+
+libmem therefore publishes no ABI, and `BUILD_SHARED_LIBS` buys close to nothing,
+a `.so` of 14 initializer symbols. Prefer static.
 
 Do not install a `Release` build unless the consumer also links with LTO. `Release`
 adds `-flto`, which makes `liblibmem.a` an LLVM bitcode archive, and a plain link
