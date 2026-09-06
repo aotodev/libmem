@@ -2,6 +2,8 @@
 
 [![gcc](https://github.com/aotodev/libmem/actions/workflows/gcc.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/gcc.yml)
 [![clang](https://github.com/aotodev/libmem/actions/workflows/clang.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/clang.yml)
+[![gcc gnu++26](https://github.com/aotodev/libmem/actions/workflows/gcc-gnu.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/gcc-gnu.yml)
+[![clang gnu++26](https://github.com/aotodev/libmem/actions/workflows/clang-gnu.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/clang-gnu.yml)
 [![fuzz](https://github.com/aotodev/libmem/actions/workflows/fuzz.yml/badge.svg?branch=master)](https://github.com/aotodev/libmem/actions/workflows/fuzz.yml)
 
 A self-contained C++ memory allocator and container library. Built entirely
@@ -103,9 +105,9 @@ To use it from another project, see [docs/integration.md](docs/integration.md).
 
 ## Tested and fuzzed
 
-CI builds and runs the suite with **both GCC and Clang** on every push, under
-**AddressSanitizer + UndefinedBehaviorSanitizer**, with the ring handoff also run
-under **ThreadSanitizer**. Coverage-guided **libFuzzer** harnesses drive
+CI builds and runs the suite with **both GCC and Clang** on every push, in both
+**`c++26` and `gnu++26`**, under **AddressSanitizer + UndefinedBehaviorSanitizer**,
+with the ring handoff also run under **ThreadSanitizer**. Coverage-guided **libFuzzer** harnesses drive
 `multislab`, `sparse_set`, and `sparse_map`; the two sparse ones are differential,
 comparing every operation against a standard container.
 

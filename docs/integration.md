@@ -49,7 +49,6 @@ project(my_project LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_MODULE_STD ON)
 
 find_package(libmem 0.9 REQUIRED)
@@ -59,7 +58,15 @@ target_link_libraries(my_target PRIVATE libmem::libmem)
 
 The package installs module interfaces as sources under
 `share/libmem/modules/libmem/`, never BMIs: your build compiles them with your own
-flags, which is what keeps the std module consistent across the two.
+flags, which is what keeps the std module consistent across the two. Your own flags
+and not ours: libmem's warning set and `-Werror` stay in libmem's build, so consuming
+a Clang-built install with GCC works and vice versa.
+
+`CMAKE_CXX_EXTENSIONS` is yours to set. libmem pins no dialect, so its modules
+compile as `c++26` or `gnu++26` to match yours and there is only ever one
+`import std` BMI. Both dialects are built and tested in CI. `CMAKE_CXX_STANDARD`
+is optional too: `libmem::libmem` carries `cxx_std_26`, which raises a consumer
+that sets nothing.
 
 Compatibility is `SameMinorVersion`. Pre-1.0 a minor bump is a break, so `0.9`
 accepts 0.9.x and rejects 0.10.

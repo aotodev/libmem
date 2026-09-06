@@ -71,7 +71,11 @@ if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_CXX_STANDARD 26)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-    set(CMAKE_CXX_EXTENSIONS OFF)
+    # Not forced: the *-gnu.yml legs configure with -DCMAKE_CXX_EXTENSIONS=ON.
+    if(NOT DEFINED CMAKE_CXX_EXTENSIONS)
+        set(CMAKE_CXX_EXTENSIONS OFF)
+    endif()
+
     set(CMAKE_CXX_MODULE_STD ON)
     set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
@@ -135,14 +139,19 @@ if(BUILD_SHARED_LIBS)
     )
 endif()
 
-# Per-target, so libmem still compiles when the block above is skipped.
+# Per-target, so libmem still compiles when the block above is skipped. CXX_EXTENSIONS
+# is deliberately absent: pinning it here outlives an embedded build and splits the
+# dialect against the consumer, which is two `import std` BMIs and a CRC mismatch.
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 26
     CXX_STANDARD_REQUIRED ON
-    CXX_EXTENSIONS OFF
     CXX_MODULE_STD ON
     CXX_SCAN_FOR_MODULES ON
 )
+
+# The floor a consumer must meet; without it one that sets no standard fails at
+# generate time naming `@cmake_cxx_std@synth_0` rather than libmem.
+target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_26)
 
 # ---------------------------------------------------------------------------------------
 # Compiler warnings
@@ -160,22 +169,16 @@ target_compile_options(libmem_project_flags INTERFACE
     -Wsign-conversion
     -Wold-style-cast
     -Wuninitialized
+    -Wself-move
+    -Wpessimizing-move
+    -Wredundant-move
+    # Not in -Wall on either compiler. It is what keeps the try_clone family single-exit.
+    -Wnrvo
     -Werror
     # No -Wundef: it makes libstdc++'s bits/std.cc fail to scan, so nothing builds.
+    # Genex, not an if(): whoever compiles resolves it, and GCC rejects an unknown -W.
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-reference-tu-local-entity-in-other-tu>
 )
-
-# Compiler-specific warnings
-if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(libmem_project_flags INTERFACE
-        -Wmove
-        -Wno-reference-tu-local-entity-in-other-tu
-    )
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(libmem_project_flags INTERFACE
-        -Wpessimizing-move
-        -Wredundant-move
-    )
-endif()
 
 # ---------------------------------------------------------------------------------------
 # Sanitizers. Separate from the warnings above: this one is linked even when embedded.
@@ -197,9 +200,11 @@ endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE libmem_sanitizers)
 
-# Top-level only: never impose -Werror on a consumer's build.
+# Top-level only: never impose -Werror on a consumer's build. BUILD_LOCAL_INTERFACE is
+# what enforces that: a plain PRIVATE link still reaches the consumer through
+# IMPORTED_CXX_MODULES_LINK_LIBRARIES, which is applied when they build our module sources.
 if(PROJECT_IS_TOP_LEVEL)
-    target_link_libraries(${PROJECT_NAME} PRIVATE libmem_project_flags)
+    target_link_libraries(${PROJECT_NAME} PRIVATE $<BUILD_LOCAL_INTERFACE:libmem_project_flags>)
 endif()
 
 # ---------------------------------------------------------------------------------------
@@ -231,8 +236,9 @@ target_sources(${PROJECT_NAME}
 
 # ---------------------------------------------------------------------------------------
 # Install / package
-# libmem_project_flags and libmem_sanitizers land in INTERFACE_LINK_LIBRARIES under
-# $<LINK_ONLY:> despite being PRIVATE; install(EXPORT) rejects the set without them.
+# libmem_sanitizers lands in INTERFACE_LINK_LIBRARIES under $<LINK_ONLY:> despite being
+# PRIVATE; install(EXPORT) rejects the set without it. libmem_project_flags does not,
+# because it is linked through BUILD_LOCAL_INTERFACE.
 # ---------------------------------------------------------------------------------------
 if(LIBMEM_INSTALL)
     include(GNUInstallDirs)
@@ -244,7 +250,7 @@ if(LIBMEM_INSTALL)
     # keyword; cmake rejects splitting the call ("not all of its interface file
     # sets are installed").
     # cmake-lint: disable=E1122
-    install(TARGETS ${PROJECT_NAME} libmem_project_flags libmem_sanitizers
+    install(TARGETS ${PROJECT_NAME} libmem_sanitizers
         EXPORT libmem-targets
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
