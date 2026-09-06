@@ -12,7 +12,7 @@ enable_experimental_std()
 # ---------------------------------------------------------------------------------------
 # Project
 # ---------------------------------------------------------------------------------------
-project(libmem LANGUAGES CXX)
+project(libmem VERSION 0.9.0 LANGUAGES CXX)
 
 # ---------------------------------------------------------------------------------------
 # Compiler requirements: Clang >= 22 or GCC >= 15
@@ -51,6 +51,7 @@ option(THREAD_SANITIZER      "Enable ThreadSanitizer instead of ASan"           
 option(LIBMEM_BUILD_TESTS    "Build unit tests"                                          OFF)
 option(LIBMEM_BUILD_FUZZERS  "Build libFuzzer targets (Clang + Debug + sanitizers only)" OFF)
 option(LIBMEM_USE_CCACHE     "Enable ccache if installed"                                OFF)
+option(LIBMEM_INSTALL        "Generate install rules and a find_package config"          ${PROJECT_IS_TOP_LEVEL})
 
 include(CMakeDependentOption)
 
@@ -127,6 +128,17 @@ else()
     endif()
 endif()
 
+# Same name a find_package consumer gets, so both paths link the same string.
+add_library(libmem::libmem ALIAS ${PROJECT_NAME})
+
+if(BUILD_SHARED_LIBS)
+    # 0.x: every minor is an ABI break, so the soname carries major.minor.
+    set_target_properties(${PROJECT_NAME} PROPERTIES
+        VERSION   ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
+    )
+endif()
+
 # Per-target, so libmem still compiles when the block above is skipped.
 set_target_properties(${PROJECT_NAME} PROPERTIES
     CXX_STANDARD 26
@@ -144,9 +156,11 @@ if(BUILD_SHARED_LIBS)
     target_compile_definitions(${PROJECT_NAME} PRIVATE LIBMEM_BUILDING)
 endif()
 
-target_include_directories(${PROJECT_NAME} PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+target_sources(${PROJECT_NAME}
+  PUBLIC
+    FILE_SET HEADERS
+      BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
+      FILES include/libmem/export.h
 )
 
 # ---------------------------------------------------------------------------------------
@@ -229,9 +243,68 @@ set(ModuleInterfaceFiles
 
 target_sources(${PROJECT_NAME}
   PUBLIC
-    FILE_SET CXX_MODULES FILES
-      ${ModuleInterfaceFiles}
+    FILE_SET CXX_MODULES
+      BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/src
+      FILES ${ModuleInterfaceFiles}
 )
+
+# ---------------------------------------------------------------------------------------
+# Install / package
+# libmem_project_flags and libmem_sanitizers land in INTERFACE_LINK_LIBRARIES under
+# $<LINK_ONLY:> despite being PRIVATE; install(EXPORT) rejects the set without them.
+# ---------------------------------------------------------------------------------------
+if(LIBMEM_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    set(LIBMEM_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/libmem")
+
+    # Top-level builds hide symbols and nothing is annotated LIBMEM_EXPORT, so the
+    # installed .so exports only module initializers.
+    if(BUILD_SHARED_LIBS)
+        message(WARNING "[libmem] a shared install exports no usable symbols; install the static build")
+    endif()
+
+    # cmake-lint reads the two FILE_SET DESTINATIONs as a duplicate keyword; it
+    # predates FILE_SET, and cmake rejects splitting the call ("not all of its
+    # interface file sets are installed").
+    # cmake-lint: disable=E1122
+    install(TARGETS ${PROJECT_NAME} libmem_project_flags libmem_sanitizers
+        EXPORT libmem-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        FILE_SET HEADERS DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        # Module interfaces install as sources: the consumer builds their own BMIs.
+        FILE_SET CXX_MODULES DESTINATION "${CMAKE_INSTALL_DATADIR}/libmem/modules"
+    )
+
+    install(EXPORT libmem-targets
+        FILE libmem-targets.cmake
+        NAMESPACE libmem::
+        DESTINATION "${LIBMEM_INSTALL_CMAKEDIR}"
+        CXX_MODULES_DIRECTORY cxx-modules
+    )
+
+    # Consumers need this before their own project() call, so it ships separately.
+    install(FILES cmake/enable_standard_modules.cmake
+        DESTINATION "${LIBMEM_INSTALL_CMAKEDIR}")
+
+    configure_package_config_file(
+        cmake/libmemConfig.cmake.in
+        "${CMAKE_CURRENT_BINARY_DIR}/libmemConfig.cmake"
+        INSTALL_DESTINATION "${LIBMEM_INSTALL_CMAKEDIR}")
+
+    # SameMinorVersion: pre-1.0, a minor bump is a break.
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/libmemConfigVersion.cmake"
+        COMPATIBILITY SameMinorVersion)
+
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/libmemConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/libmemConfigVersion.cmake"
+        DESTINATION "${LIBMEM_INSTALL_CMAKEDIR}")
+endif()
 
 # ---------------------------------------------------------------------------------------
 # Tests. Top-level only: a consumer must not get our suites, and `unit_tests` would
