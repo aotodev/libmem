@@ -467,3 +467,45 @@ TEST(MultislabTest, allocation_reuses_a_free_slot_before_growing) {
         }
     }
 }
+
+/*
+ * deallocate(iterator) skips find_owner but must leave the same state as
+ * deallocate(ptr): full->active moves, empty counts, and hysteresis frees.
+ */
+TEST(MultislabTest, deallocate_by_iterator_matches_deallocate_by_pointer) {
+    constexpr std::uint32_t per_slab{4};
+    const threshold_policy policy{.max_empty_reserve = 1};
+    multislab<block, per_slab> by_ptr{policy};
+    multislab<block, per_slab> by_it{policy};
+
+    std::vector<void*> ptrs(3 * per_slab);
+    std::vector<void*> its(3 * per_slab);
+    for (std::size_t i{0}; i < ptrs.size(); ++i) {
+        ptrs[i] = by_ptr.allocate();
+        its[i] = by_it.allocate();
+    }
+
+    /* Empty the middle slab first, then the others, so both a kept and a
+     * released empty slab are exercised. */
+    for (const std::size_t i : {4u, 5u, 6u, 7u, 0u, 1u, 2u, 3u, 8u, 9u, 10u, 11u}) {
+        by_ptr.deallocate(ptrs[i]);
+        by_it.deallocate(by_it.make_iterator(its[i]));
+        EXPECT_EQ(by_it.slab_count(), by_ptr.slab_count()) << "after " << i;
+        EXPECT_EQ(by_it.empty_slab_count(), by_ptr.empty_slab_count()) << "after " << i;
+        EXPECT_EQ(std::ranges::distance(by_it.begin(), by_it.end()), std::ranges::distance(by_ptr.begin(), by_ptr.end()));
+    }
+}
+
+TEST(MultislabTest, deallocate_through_the_allocate_at_iterator) {
+    multislab<block, 4> ms{};
+
+    const auto kept{ms.allocate_at()};
+    const auto dropped{ms.allocate_at()};
+    ASSERT_NE(dropped.ptr, nullptr);
+
+    ms.deallocate(dropped.it);
+    EXPECT_EQ(std::ranges::distance(ms.begin(), ms.end()), 1);
+    EXPECT_EQ(*ms.begin(), kept.ptr);
+    ms.deallocate(kept.it);
+    EXPECT_EQ(ms.empty_slab_count(), 1u);
+}
