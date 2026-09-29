@@ -6,7 +6,8 @@ Requires **Clang** and a **Debug** build (so the sanitizers are active).
 
 | Target             | Exercises                                                                |
 |--------------------|--------------------------------------------------------------------------|
-| `fuzz_multislab`   | `multislab` alloc/release op-streams across block sizes, caps, policies   |
+| `fuzz_multislab`   | `multislab` alloc/release op-streams and mutating traversals, across caps   |
+| `fuzz_pool`        | `pool` inserts, erases, mutating sweeps and clones, lifetime-trapping payload |
 | `fuzz_sparse_set`  | `sparse_set` against a `std::unordered_set` model, all three storage kinds |
 | `fuzz_sparse_map`  | `sparse_map` against a `std::unordered_map` model, lifetime-trapping payload |
 
@@ -15,6 +16,13 @@ valid operations (so the library's defensive asserts are never tripped), and
 aborts via `FUZZ_CHECK` when a structural invariant is violated, ASan/UBSan
 catch memory/UB bugs, the invariants catch logic bugs (e.g. the iteration-count
 check catches lost/leaked slabs).
+
+The `multislab` and `pool` harnesses also hold iterators across mutation. A traversal
+that releases and allocates as it walks must visit only live blocks, none twice, and
+every block live for the whole walk exactly once; a stored `pool` iterator must still
+dereference to its own element. Under a slab cap, an allocation must succeed exactly
+when the cap leaves room, so a spurious `nullptr` fails. The `pool` payload carries a
+magic word cleared by its destructor, like the map's.
 
 The two sparse harnesses are differential: every operation runs against a standard
 container and the results are compared, on top of the structural invariants. The

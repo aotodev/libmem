@@ -72,8 +72,8 @@ mismatch reaching `deallocate` is undefined behaviour that neither ASan nor
 
 ## Fuzzing
 
-Coverage-guided **libFuzzer** harnesses drive `multislab`, `sparse_set`, and
-`sparse_map` under ASan + UBSan (`-DLIBMEM_BUILD_FUZZERS=ON`, Clang only, Debug
+Coverage-guided **libFuzzer** harnesses drive `multislab`, `pool`, `sparse_set`,
+and `sparse_map` under ASan + UBSan (`-DLIBMEM_BUILD_FUZZERS=ON`, Clang only, Debug
 only). CI runs a short, time-boxed smoke pass on each. The two sparse harnesses are
 differential, comparing every operation against a standard container.
 
