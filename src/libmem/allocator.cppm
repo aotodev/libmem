@@ -26,7 +26,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:allocator;
 

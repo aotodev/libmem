@@ -38,7 +38,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:vector;
 
@@ -271,19 +271,19 @@ public:
      * @pre `index < size()`.
      */
     constexpr auto& operator[](this auto&& self, const size_type index) noexcept {
-        assert(index < self.size_ && "vector: index out of range");
+        LIBMEM_ASSERT(index < self.size_ && "vector: index out of range");
         return self.data()[index];
     }
 
     /** @pre `!empty()`. */
     constexpr auto& front(this auto&& self) noexcept {
-        assert(self.size_ > 0 && "vector: front() on an empty vector");
+        LIBMEM_ASSERT(self.size_ > 0 && "vector: front() on an empty vector");
         return *self.data();
     }
 
     /** @pre `!empty()`. */
     constexpr auto& back(this auto&& self) noexcept {
-        assert(self.size_ > 0 && "vector: back() on an empty vector");
+        LIBMEM_ASSERT(self.size_ > 0 && "vector: back() on an empty vector");
         return self.data()[self.size_ - 1];
     }
 
@@ -433,7 +433,7 @@ public:
      * @pre `!empty()`.
      */
     constexpr void pop_back() noexcept {
-        assert(size_ > 0 && "vector: pop_back() on an empty vector");
+        LIBMEM_ASSERT(size_ > 0 && "vector: pop_back() on an empty vector");
         std::destroy_at(store_.data() + --size_);
     }
 
@@ -445,7 +445,7 @@ public:
     constexpr iterator erase(const const_iterator pos)
         requires std::is_move_assignable_v<value_type>
     {
-        assert(pos >= cbegin() && pos < cend() && "vector: erase position out of range");
+        LIBMEM_ASSERT(pos >= cbegin() && pos < cend() && "vector: erase position out of range");
         return erase(pos, pos + 1);
     }
 
@@ -453,7 +453,7 @@ public:
     constexpr iterator erase(const const_iterator first, const const_iterator last)
         requires std::is_move_assignable_v<value_type>
     {
-        assert(first >= cbegin() && last <= cend() && first <= last && "vector: erase range out of range");
+        LIBMEM_ASSERT(first >= cbegin() && last <= cend() && first <= last && "vector: erase range out of range");
 
         value_type* slots{store_.data()};
         const size_type at{static_cast<size_type>(first - cbegin())};
@@ -479,7 +479,7 @@ public:
     constexpr iterator erase_unordered(const const_iterator pos)
         requires std::is_move_assignable_v<value_type>
     {
-        assert(pos >= cbegin() && pos < cend() && "vector: erase position out of range");
+        LIBMEM_ASSERT(pos >= cbegin() && pos < cend() && "vector: erase position out of range");
 
         value_type* slots{store_.data()};
         const size_type at{static_cast<size_type>(pos - cbegin())};
@@ -526,7 +526,7 @@ private:
 
         /* Either storage is inline-only, or `other` had not spilled. Both arrays
          * have the same static extent, so the elements fit by construction. */
-        assert(other.size_ <= store_.capacity() && "vector: source does not fit the destination slots");
+        LIBMEM_ASSERT(other.size_ <= store_.capacity() && "vector: source does not fit the destination slots");
 
         detail::relocate_n(other.data(), other.size_, store_.data());
         size_ = other.size_;

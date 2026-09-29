@@ -257,6 +257,9 @@ if(LIBMEM_INSTALL)
         FILE_SET CXX_MODULES DESTINATION "${CMAKE_INSTALL_DATADIR}/libmem/modules"
     )
 
+    # Next to the .cppm files: they include it by a relative quoted path.
+    install(FILES src/libmem/assert.hpp DESTINATION "${CMAKE_INSTALL_DATADIR}/libmem/modules/libmem")
+
     install(EXPORT libmem-targets
         FILE libmem-targets.cmake
         NAMESPACE libmem::

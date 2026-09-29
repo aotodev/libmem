@@ -132,6 +132,16 @@ set options like `-fno-rtti`, LTO, and sanitizers project-wide, and have libmem 
 the rest of the build agree. A mismatch forks the std BMI at best and is ill-formed
 at worst.
 
+## Precondition checks
+
+Library checks are `assert`. Defining `LIBMEM_CONTRACTS` project-wide turns them
+into `contract_assert` where the compiler has contracts, governed by
+`-fcontract-evaluation-semantic` instead of `NDEBUG`. Not usable yet: GCC 16 fails
+to compile or link importers of such modules.
+
+A bad release (foreign or misaligned pointer, double free) is rejected without
+touching allocator state, even with the check compiled out.
+
 ## Option naming
 
 `USE_SANITIZERS` and `THREAD_SANITIZER` are intentionally **not** prefixed:

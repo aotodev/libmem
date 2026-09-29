@@ -25,7 +25,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:sparse_index;
 
@@ -162,7 +162,7 @@ public:
     constexpr size_type get(const size_type at) const noexcept { return at < slots_.capacity() ? slots_.data()[at] : npos; }
 
     constexpr void set(const size_type at, const size_type index) noexcept {
-        assert(at < slots_.capacity() && "flat_sparse_index: subscript not reserved");
+        LIBMEM_ASSERT(at < slots_.capacity() && "flat_sparse_index: subscript not reserved");
         slots_.data()[at] = index;
     }
 
@@ -172,7 +172,7 @@ public:
      *         index untouched. Always `false` past a fixed extent.
      */
     constexpr bool reserve_for(const size_type at) {
-        assert(at != npos && "flat_sparse_index: npos is the reserved tombstone, not a subscript");
+        LIBMEM_ASSERT(at != npos && "flat_sparse_index: npos is the reserved tombstone, not a subscript");
 
         if (at < slots_.capacity()) {
             return true;
@@ -303,7 +303,7 @@ public:
 
     void set(const size_type at, const size_type index) noexcept {
         const size_type page{at >> page_shift};
-        assert(page < pages_ && directory_.data()[page] != nullptr && "paged_sparse_index: subscript not reserved");
+        LIBMEM_ASSERT(page < pages_ && directory_.data()[page] != nullptr && "paged_sparse_index: subscript not reserved");
         directory_.data()[page][at & page_mask] = index;
     }
 
@@ -317,7 +317,7 @@ public:
      * @return `false` when the resource could not supply the space.
      */
     bool reserve_for(const size_type at) {
-        assert(at != npos && "paged_sparse_index: npos is the reserved tombstone, not a subscript");
+        LIBMEM_ASSERT(at != npos && "paged_sparse_index: npos is the reserved tombstone, not a subscript");
 
         const size_type page{at >> page_shift};
 

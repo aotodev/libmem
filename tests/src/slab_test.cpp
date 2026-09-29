@@ -10,6 +10,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <ranges>
 #include <vector>
 
@@ -219,4 +220,59 @@ TEST(SlabTest, index_of_and_deallocate_at_round_trip) {
     EXPECT_EQ(s.used_count(), 1u);
     EXPECT_EQ(*s.begin(), second.ptr);
     EXPECT_EQ(s.allocate_at().index, first.index);
+}
+
+TEST(SlabTest, constructor_clamps_memory_past_max_blocks) {
+    alignas(block) std::array<std::byte, block * 9> storage{};
+    slab<block, 8> s{storage.data(), storage.size()};
+
+    EXPECT_EQ(s.block_count(), 8u);
+    for (std::uint32_t i{0}; i < 8; ++i) {
+        ASSERT_NE(s.allocate(), nullptr);
+    }
+    EXPECT_EQ(s.allocate(), nullptr);
+}
+
+TEST(SlabTest, constructor_accepts_memory_for_fewer_blocks) {
+    alignas(block) std::array<std::byte, block * 3> storage{};
+    slab<block, 8> s{storage.data(), storage.size()};
+
+    EXPECT_EQ(s.block_count(), 3u);
+    for (std::uint32_t i{0}; i < 3; ++i) {
+        ASSERT_NE(s.allocate(), nullptr);
+    }
+    EXPECT_EQ(s.allocate(), nullptr);
+}
+
+namespace {
+
+template <std::size_t Size, std::uint32_t Count>
+concept slab_instantiable = requires { typename slab<Size, Count, 1>; };
+
+} // namespace
+
+TEST(SlabTest, geometry_whose_size_overflows_is_rejected) {
+    constexpr std::size_t huge{std::numeric_limits<std::size_t>::max() / 2 + 1};
+    static_assert(slab_instantiable<1, 64>);
+    static_assert(!slab_instantiable<huge, 2>);
+    static_assert(!slab_instantiable<1, 0>);
+}
+
+/* With checks compiled out the release is rejected and the slab left as it was. */
+TEST(SlabTest, bad_deallocate_is_rejected) {
+    alignas(block) std::array<std::byte, block * 8> storage{};
+    slab<block, 8> s{storage.data(), storage.size()};
+    const auto a{s.allocate_at()};
+    std::byte* const misaligned{static_cast<std::byte*>(a.ptr) + 1};
+
+#ifdef NDEBUG
+    EXPECT_FALSE(s.deallocate(misaligned));
+    EXPECT_FALSE(s.deallocate_at(a.index + 1));
+    EXPECT_TRUE(s.deallocate_at(a.index));
+    EXPECT_FALSE(s.deallocate_at(a.index));
+    EXPECT_EQ(s.used_count(), 0u);
+#else
+    EXPECT_DEATH(static_cast<void>(s.deallocate(misaligned)), "not a block of this slab");
+    EXPECT_DEATH(static_cast<void>(s.deallocate_at(a.index + 1)), "double free");
+#endif
 }
