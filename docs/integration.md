@@ -7,6 +7,20 @@ std;` enabled in your project.
 ## FetchContent
 
 ```cmake
+cmake_minimum_required(VERSION 3.30 FATAL_ERROR)
+
+# Before project(): CMAKE_EXPERIMENTAL_CXX_IMPORT_STD is read when CXX is enabled,
+# and libmem is not fetched yet, so copy cmake/enable_standard_modules.cmake out of
+# this repo rather than including its copy.
+include(enable_standard_modules)
+enable_experimental_std()
+
+project(my_project LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 26)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_MODULE_STD ON)
+
 include(FetchContent)
 FetchContent_Declare(
     libmem
@@ -18,6 +32,14 @@ FetchContent_MakeAvailable(libmem)
 
 target_link_libraries(my_target PRIVATE libmem::libmem)
 ```
+
+Neither `enable_experimental_std()` nor `CMAKE_CXX_MODULE_STD` is optional, and a
+fetching consumer has to supply both itself: without the first, configure fails at
+generate time with `The "CXX_MODULE_STD" property on target ... requires toolchain
+support`; without the second, your own `import std;` fails to compile with `unknown
+compiled module interface: no such module`. The activation token is a uuid that
+changes with every CMake release, which is why it lives in a helper that maps
+version to token rather than in a line you paste.
 
 A tag can be force-pushed, so `GIT_TAG` with a full commit sha is the reproducible
 pin. `libmem::libmem` and plain `libmem` are the same target here; the namespaced
@@ -64,9 +86,13 @@ a Clang-built install with GCC works and vice versa.
 
 `CMAKE_CXX_EXTENSIONS` is yours to set. libmem pins no dialect, so its modules
 compile as `c++26` or `gnu++26` to match yours and there is only ever one
-`import std` BMI. Both dialects are built and tested in CI. `CMAKE_CXX_STANDARD`
-is optional too: `libmem::libmem` carries `cxx_std_26`, which raises a consumer
-that sets nothing.
+`import std` BMI. Both dialects are built and tested in CI.
+
+Set `CMAKE_CXX_STANDARD 26` even though `libmem::libmem` carries `cxx_std_26` and
+will raise you without it. Omitting it builds and runs, but your own targets stay
+at CMake's default while libmem's are raised, and two standards are two `import std`
+BMIs: CMake then synthesises a second set of module targets and compiles everything
+twice. Setting it leaves one BMI and no synthesised targets.
 
 Compatibility is `SameMinorVersion`. Pre-1.0 a minor bump is a break, so `0.9`
 accepts 0.9.x and rejects 0.10.

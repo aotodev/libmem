@@ -10,6 +10,7 @@
 #   ./scripts/make.sh --shared           # Build as shared library
 #   ./scripts/make.sh --clean            # Remove build directory first
 #   ./scripts/make.sh --clangd           # Build build-clangd/, the database .clangd reads
+#   ./scripts/make.sh --libstdcxx        # Clang with libstdc++, as CI builds, in build-libstdcxx/
 #   ./scripts/make.sh --release --test   # Combine flags as needed
 # ---------------------------------------------------------------------------------------
 
@@ -25,6 +26,7 @@ RUN_TESTS=false
 BUILD_SHARED=false
 CLEAN=false
 CLANGD=false
+LIBSTDCXX=false
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 SOURCE_DIR=$(cd "${SCRIPT_DIR}/.." && pwd)
@@ -41,9 +43,10 @@ for arg in "$@"; do
         --shared)   BUILD_SHARED=true ;;
         --clean)    CLEAN=true ;;
         --clangd)   CLANGD=true ;;
+        --libstdcxx) LIBSTDCXX=true ;;
         *)
             echo "Unknown option: ${arg}"
-            echo "Usage: $0 [--release] [--gcc] [--test] [--shared] [--clean] [--clangd]"
+            echo "Usage: $0 [--release] [--gcc] [--test] [--shared] [--clean] [--clangd] [--libstdcxx]"
             exit 1
             ;;
     esac
@@ -60,6 +63,16 @@ if ${CLANGD}; then
     USE_GCC=false
     BUILD_TESTS=true
     RUN_TESTS=false
+fi
+
+# Own directory: build/ caches the toolchain file's -stdlib=libc++, and the compiler path
+# does not change, so CMake would keep it.
+if ${LIBSTDCXX}; then
+    if ${USE_GCC} || ${CLANGD}; then
+        echo "--libstdcxx is a Clang build; it cannot combine with --gcc or --clangd"
+        exit 1
+    fi
+    BUILD_DIR="${SOURCE_DIR}/build-libstdcxx"
 fi
 
 # ---------------------------------------------------------------------------------------
@@ -99,6 +112,15 @@ if ${USE_GCC}; then
     fi
     if [ -z "${CXX:-}" ]; then
         export CXX="g++"
+    fi
+elif ${LIBSTDCXX}; then
+    echo "==> Using Clang with libstdc++"
+    # No toolchain file: it forces -stdlib=libc++.
+    if [ -z "${CC:-}" ]; then
+        export CC="clang"
+    fi
+    if [ -z "${CXX:-}" ]; then
+        export CXX="clang++"
     fi
 else
     echo "==> Using Clang via LLVM toolchain"

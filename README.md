@@ -84,6 +84,7 @@ elements should not touch the heap.
 ./scripts/make.sh --test       # Build and run tests
 ./scripts/make.sh --shared     # Shared library
 ./scripts/make.sh --clangd     # Editor database in build-clangd/
+./scripts/make.sh --libstdcxx  # Clang with libstdc++, as CI builds
 ```
 
 The editor database is a directory of its own because `build/` alternates
