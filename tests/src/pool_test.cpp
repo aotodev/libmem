@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <ranges>
+#include <stdexcept>
 #include <vector>
 
 import libmem;
@@ -317,4 +318,31 @@ TEST(PoolTest, erase_while_iterating_visits_every_element_once) {
     EXPECT_EQ(visited, (std::ranges::iota_view{0, 12} | std::ranges::to<std::vector>()));
     EXPECT_EQ(p.size(), 6u);
     EXPECT_TRUE(std::ranges::none_of(p, [](const std::int32_t v) { return v % 2 == 0; }));
+}
+
+namespace {
+
+struct throws_on_negative {
+    std::int32_t v;
+    explicit throws_on_negative(const std::int32_t x) : v{x} {
+        if (x < 0) {
+            throw std::invalid_argument{"negative"};
+        }
+    }
+};
+
+} // namespace
+
+/* A throwing constructor gives its slot back through the rollback path. */
+TEST(PoolTest, emplace_rollback_releases_the_slot) {
+    pool<throws_on_negative, 4> p{};
+    p.emplace(1);
+    EXPECT_THROW(p.emplace(-1), std::invalid_argument);
+    EXPECT_EQ(p.size(), 1u);
+    EXPECT_EQ(std::ranges::distance(p.begin(), p.end()), 1);
+
+    const auto reused{p.emplace(2)};
+    EXPECT_EQ(std::ranges::distance(p.begin(), p.end()), 2);
+    EXPECT_EQ(reused->v, 2);
+    EXPECT_EQ(p.slab_count(), 1u);
 }

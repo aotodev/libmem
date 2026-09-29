@@ -5,7 +5,7 @@
 | Operation | `slab` | `multislab` | `arena` / `typed_arena` | `pool` |
 |-----------|--------|-------------|-------------------------|--------|
 | allocate | O(N/64) | O(N/64) amortised | O(1) | O(N/64) amortised |
-| deallocate | O(1) | O(S) | no-op | O(S) |
+| deallocate | O(1) | O(1) by iterator, O(S) by pointer | no-op | O(1) (`erase`) |
 | iterate (skip empties) | O(N/64) per word | O(N/64) per word | n/a | O(N/64) per word |
 | reset / clear | O(W) | O(S) | O(1) / O(D) | O(S + E) |
 
@@ -13,7 +13,7 @@ N = capacity in blocks, W = bitmap words (N/64), S = number of slab pages,
 D = registered destructors, E = live elements (for non-trivial destructors).
 
 The O(S) terms are all `find_owner`, a linear scan over slab pages. See
-[containers.md](containers.md#allocators) for why allocation does not pay it.
+[containers.md](containers.md#allocators) for which calls pay it.
 
 ## Sequences
 

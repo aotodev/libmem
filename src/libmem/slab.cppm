@@ -166,12 +166,26 @@ public:
      */
     constexpr void deallocate(void* ptr) noexcept {
         assert(ptr != nullptr);
-        assert(owns(ptr));
+        deallocate_at(index_of(ptr));
+    }
 
-        const auto index{ptr_to_index(ptr)};
+    /**
+     * @brief Release the block at bit-index `index`, as reported by `allocate_at()` or an iterator.
+     * @pre The block at `index` is allocated.
+     */
+    constexpr void deallocate_at(const std::uint32_t index) noexcept {
+        assert(index < block_count_);
         assert(detail::bitmap_test(bitmap_, index) && "double-free detected");
-
         detail::bitmap_clear(bitmap_, index);
+    }
+
+    /**
+     * @brief Bit-index of the block at `ptr`.
+     * @pre `owns(ptr)`.
+     */
+    constexpr std::uint32_t index_of(const void* ptr) const noexcept {
+        assert(owns(ptr));
+        return static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
     }
 
     /** @brief Test whether `ptr` belongs to this slab's memory region. */
@@ -244,6 +258,9 @@ public:
 
         constexpr void* operator*() const noexcept { return slab_->index_to_ptr(index_); }
 
+        /** @brief Bit-index of the current block; `capacity` at the end. */
+        constexpr std::uint32_t index() const noexcept { return index_; }
+
         constexpr iterator& operator++() noexcept {
             index_ = slab_->next_allocated(index_ + 1);
             return *this;
@@ -309,10 +326,6 @@ private:
         const auto later{std::views::drop(bitmap_, static_cast<std::ptrdiff_t>(word_idx + 1))};
         const auto hit{std::ranges::find_if(later, [](const std::uint64_t word) { return word != 0; })};
         return hit == bitmap_.end() ? capacity : first_in(static_cast<std::size_t>(hit - bitmap_.begin()), *hit);
-    }
-
-    constexpr std::uint32_t ptr_to_index(const void* ptr) const noexcept {
-        return static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
     }
 };
 

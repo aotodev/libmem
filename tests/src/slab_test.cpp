@@ -205,3 +205,18 @@ TEST(SlabTest, iterator_crosses_empty_words) {
     }
     EXPECT_EQ(visited, (std::vector<void*>{blocks[0], blocks[130]}));
 }
+
+TEST(SlabTest, index_of_and_deallocate_at_round_trip) {
+    alignas(block) std::array<std::byte, block * 8> storage{};
+    slab<block, 8> s{storage.data(), storage.size()};
+
+    const auto first{s.allocate_at()};
+    const auto second{s.allocate_at()};
+    EXPECT_EQ(s.index_of(second.ptr), second.index);
+    EXPECT_EQ(s.begin().index(), first.index);
+
+    s.deallocate_at(first.index);
+    EXPECT_EQ(s.used_count(), 1u);
+    EXPECT_EQ(*s.begin(), second.ptr);
+    EXPECT_EQ(s.allocate_at().index, first.index);
+}

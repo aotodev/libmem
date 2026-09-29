@@ -197,13 +197,12 @@ is move-only.
 
 Planned: `freelist`, an intrusive free-list allocator for variable-size blocks.
 
-`find_owner` is a linear scan over slab pages, and is what makes `deallocate` O(S)
-on `multislab` and `pool`. Allocation avoids it entirely: `slab::allocate_at()` and
-`multislab::allocate_at()` return the block *plus* its position, both of which the
-allocator already had in hand. `pool::emplace` uses this, so insertion stays
-O(N/64) amortised rather than paying an O(S) scan to recover a position it just
-discarded. Reach for `make_iterator(ptr)` only when you have a pointer and no
-allocation to go with it.
+`find_owner` is a linear scan over slab pages, paid by `multislab::deallocate(ptr)`
+and `make_iterator(ptr)`. Everything that already holds a position skips it:
+`slab::allocate_at()` and `multislab::allocate_at()` return the block *plus* its
+position, and `multislab::deallocate(iterator)` releases through it. `pool` uses
+both, so `emplace` stays O(N/64) amortised and `erase` is O(1). Reach for the
+pointer overloads only when you have a pointer and no position to go with it.
 
 ## Constant evaluation
 

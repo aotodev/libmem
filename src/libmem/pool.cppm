@@ -332,7 +332,7 @@ public:
             try {
                 ::new (alloc.ptr) T(std::forward<Args>(args)...);
             } catch (...) {
-                pool_.deallocate(alloc.ptr);
+                pool_.deallocate(alloc.it);
                 throw;
             }
         }
@@ -393,9 +393,8 @@ public:
         pool_iterator next{inner};
         ++next;
 
-        auto* raw{*inner};
-        static_cast<T*>(raw)->~T();
-        pool_.deallocate(raw);
+        static_cast<T*>(*inner)->~T();
+        pool_.deallocate(inner);
         --size_;
 
         return iterator{next};

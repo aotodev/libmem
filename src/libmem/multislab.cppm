@@ -156,6 +156,8 @@ public:
     /**
      * @brief Release a block previously obtained from `allocate()`.
      * @pre `ptr` was allocated from this multislab and has not been double-freed.
+     * @note O(S): finds the owning slab by scanning. Prefer `deallocate(iterator)`
+     *       when a position is at hand.
      */
     void deallocate(void* ptr) noexcept {
         assert(ptr != nullptr);
@@ -163,20 +165,7 @@ public:
         node_type* node{find_owner(ptr)};
         assert(node != nullptr && "pointer not owned by this allocator");
 
-        if (node->full()) [[unlikely]] {
-            move_to_active(node);
-        }
-
-        node->allocator.deallocate(ptr);
-        node->used--;
-
-        /* Became empty: apply shrink policy. */
-        if (node->used == 0) [[unlikely]] {
-            empty_count_++;
-            if (policy_.should_shrink(empty_count_, slab_count_)) {
-                unlink_and_free(node);
-            }
-        }
+        release(node, node->allocator.index_of(ptr));
     }
 
     /* ========================================================================
@@ -285,11 +274,7 @@ public:
             return iterator{};
         }
 
-        const auto base{reinterpret_cast<std::uintptr_t>(node->raw_memory)};
-        const auto p{reinterpret_cast<std::uintptr_t>(ptr)};
-        const auto index{static_cast<std::uint32_t>((p - base) / BlockSize)};
-
-        return iterator_at(node, index);
+        return iterator_at(node, node->allocator.index_of(ptr));
     }
 
     /**
@@ -318,6 +303,15 @@ public:
             return {};
         }
         return {raw.ptr, iterator_at(raw.node, raw.index)};
+    }
+
+    /**
+     * @brief Release the block `pos` points at, in O(1).
+     * @pre `pos` is dereferenceable. Iterators to other blocks stay valid.
+     */
+    void deallocate(const iterator& pos) noexcept {
+        assert(pos != end());
+        release(pos.node_, pos.slab_iter_.index());
     }
 
     /* ========================================================================
@@ -373,6 +367,23 @@ private:
             move_to_full(node);
         }
         return {alloc.ptr, node, alloc.index};
+    }
+
+    void release(node_type* node, const std::uint32_t index) noexcept {
+        if (node->full()) [[unlikely]] {
+            move_to_active(node);
+        }
+
+        node->allocator.deallocate_at(index);
+        node->used--;
+
+        /* Became empty: apply shrink policy. */
+        if (node->used == 0) [[unlikely]] {
+            empty_count_++;
+            if (policy_.should_shrink(empty_count_, slab_count_)) {
+                unlink_and_free(node);
+            }
+        }
     }
 
     /** @brief Build an iterator at `index` within `node`. */
