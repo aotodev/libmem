@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <ranges>
+#include <vector>
 
 import libmem;
 
@@ -153,4 +154,54 @@ TEST(SlabTest, allocate_at_reports_reused_index_after_deallocate) {
     const auto reused{s.allocate_at()};
     EXPECT_EQ(reused.ptr, first.ptr);
     EXPECT_EQ(reused.index, first.index);
+}
+
+TEST(SlabTest, iterator_skips_a_block_freed_after_it_was_built) {
+    alignas(block) std::array<std::byte, block * 8> storage{};
+    slab<block, 8> s{storage.data(), storage.size()};
+
+    void* first{s.allocate()};
+    void* second{s.allocate()};
+    auto it{s.begin()};
+    s.deallocate(second);
+
+    EXPECT_EQ(*it, first);
+    ++it;
+    EXPECT_EQ(it, s.end());
+}
+
+TEST(SlabTest, iterator_visits_a_block_allocated_ahead_of_it) {
+    alignas(block) std::array<std::byte, block * 8> storage{};
+    slab<block, 8> s{storage.data(), storage.size()};
+
+    static_cast<void>(s.allocate());
+    auto it{s.begin()};
+    void* second{s.allocate()};
+
+    ++it;
+    ASSERT_NE(it, s.end());
+    EXPECT_EQ(*it, second);
+}
+
+TEST(SlabTest, iterator_crosses_empty_words) {
+    constexpr std::uint32_t capacity{192};
+    alignas(block) std::array<std::byte, block * capacity> storage{};
+    slab<block, capacity> s{storage.data(), storage.size()};
+
+    std::array<void*, capacity> blocks{};
+    for (auto& b : blocks) {
+        b = s.allocate();
+    }
+    /* Keep bit 0 of word 0 and bit 2 of word 2; word 1 is empty. */
+    for (std::uint32_t i{0}; i < capacity; ++i) {
+        if (i != 0 && i != 130) {
+            s.deallocate(blocks[i]);
+        }
+    }
+
+    std::vector<void*> visited{};
+    for (void* p : s) {
+        visited.push_back(p);
+    }
+    EXPECT_EQ(visited, (std::vector<void*>{blocks[0], blocks[130]}));
 }

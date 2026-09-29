@@ -87,11 +87,22 @@ TEST(PoolTest, erase_returns_next) {
     EXPECT_EQ(seen.size(), 2u);
     EXPECT_TRUE(std::ranges::find(seen, 2) == seen.end());
 
-    /* `next` should reference one of the live elements. */
-    if (next != p.end()) {
-        const std::int32_t v{*next};
-        EXPECT_TRUE(v == 1 || v == 3);
-    }
+    /* 3 went in after `e2` was built, in the same bitmap word. */
+    ASSERT_NE(next, p.end());
+    EXPECT_EQ(*next, 3);
+}
+
+TEST(PoolTest, iterator_skips_an_element_erased_after_it_was_built) {
+    pool<std::int32_t> p{};
+    p.emplace(1);
+    const auto e2 = p.emplace(2);
+
+    auto it = p.begin();
+    p.erase(e2);
+
+    EXPECT_EQ(*it, 1);
+    ++it;
+    EXPECT_EQ(it, p.end());
 }
 
 TEST(PoolTest, ranges_pipe_views) {

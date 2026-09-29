@@ -226,27 +226,26 @@ public:
      * Iterator: walks allocated blocks via bitmap scanning
      * ======================================================================== */
 
+    /**
+     * @brief Iterator over allocated blocks.
+     *
+     * Holds a bit index and re-reads the live bitmap on every increment: a block
+     * freed after the iterator was built is skipped, one allocated ahead of it is
+     * visited.
+     */
     class iterator {
+        friend class slab;
+
     public:
         using difference_type = std::ptrdiff_t;
         using value_type = void*;
 
         constexpr iterator() noexcept = default;
 
-        constexpr iterator(const slab* s, std::uint32_t word_idx, std::uint64_t word) noexcept : slab_{s}, word_idx_{word_idx}, word_{word} {}
-
-        constexpr void* operator*() const noexcept {
-            const auto bit{static_cast<std::uint32_t>(std::countr_zero(word_))};
-            const std::uint32_t index{word_idx_ * bitmap_word_bits + bit};
-            return const_cast<void*>(static_cast<const void*>(slab_->memory_ + index * BlockSize));
-        }
+        constexpr void* operator*() const noexcept { return slab_->index_to_ptr(index_); }
 
         constexpr iterator& operator++() noexcept {
-            /* Clear the lowest set bit. */
-            word_ &= word_ - 1;
-            if (!word_) {
-                advance_word();
-            }
+            index_ = slab_->next_allocated(index_ + 1);
             return *this;
         }
 
@@ -256,58 +255,22 @@ public:
             return tmp;
         }
 
-        constexpr bool operator==(std::default_sentinel_t) const noexcept { return slab_ == nullptr || (!word_ && word_idx_ >= bitmap_words); }
+        constexpr bool operator==(std::default_sentinel_t) const noexcept { return index_ == capacity; }
 
         friend constexpr bool operator==(std::default_sentinel_t s, const iterator& it) noexcept { return it == s; }
 
-        /**
-         * @brief Iterator-to-iterator equality.
-         *
-         * Two iterators compare equal when they reference the same slab and
-         * either both reached their end state or both currently dereference
-         * to the same allocated block.
-         */
-        constexpr bool operator==(const iterator& rhs) const noexcept {
-            if (slab_ != rhs.slab_) {
-                return false;
-            }
-            const bool lhs_end{slab_ == nullptr || (!word_ && word_idx_ >= bitmap_words)};
-            const bool rhs_end{rhs.slab_ == nullptr || (!rhs.word_ && rhs.word_idx_ >= bitmap_words)};
-            if (lhs_end || rhs_end) {
-                return lhs_end && rhs_end;
-            }
-            if (word_idx_ != rhs.word_idx_) {
-                return false;
-            }
-            return std::countr_zero(word_) == std::countr_zero(rhs.word_);
-        }
+        /** @brief Equal when both reference the same slab and index; end is index `capacity`. */
+        constexpr bool operator==(const iterator&) const noexcept = default;
 
     private:
         const slab* slab_{};
-        std::uint32_t word_idx_{};
-        std::uint64_t word_{};
+        std::uint32_t index_{capacity};
 
-        constexpr void advance_word() noexcept {
-            ++word_idx_;
-            while (word_idx_ < bitmap_words) {
-                word_ = slab_->bitmap_[word_idx_];
-                if (word_) {
-                    return;
-                }
-                ++word_idx_;
-            }
-        }
+        constexpr iterator(const slab* s, const std::uint32_t index) noexcept : slab_{s}, index_{index} {}
     };
 
     /** @brief Begin iterator over allocated blocks. */
-    constexpr iterator begin() const noexcept {
-        for (std::uint32_t i{0}; i < bitmap_words; ++i) {
-            if (bitmap_[i]) {
-                return iterator{this, i, bitmap_[i]};
-            }
-        }
-        return iterator{this, static_cast<std::uint32_t>(bitmap_words), 0};
-    }
+    constexpr iterator begin() const noexcept { return iterator{this, next_allocated(0)}; }
 
     /** @brief Sentinel marking the end of iteration. */
     static constexpr std::default_sentinel_t end() noexcept { return {}; }
@@ -319,26 +282,7 @@ public:
      *        ascending order.
      * @pre `index < capacity` and the bit at `index` is set.
      */
-    constexpr iterator make_iterator(const std::uint32_t index) const noexcept {
-        const std::uint32_t word_idx{index / bitmap_word_bits};
-        const std::uint32_t bit{index & (bitmap_word_bits - 1)};
-        if (word_idx >= bitmap_words) [[unlikely]] {
-            return iterator{this, static_cast<std::uint32_t>(bitmap_words), 0};
-        }
-        /* Mask out bits strictly below `bit` so the iterator visits this
-         * index first. */
-        const std::uint64_t masked{bitmap_[word_idx] & (~std::uint64_t{0} << bit)};
-        if (masked) {
-            return iterator{this, word_idx, masked};
-        }
-        /* Empty word after masking -> advance to the next non-empty word. */
-        for (std::uint32_t i{word_idx + 1}; i < bitmap_words; ++i) {
-            if (bitmap_[i]) {
-                return iterator{this, i, bitmap_[i]};
-            }
-        }
-        return iterator{this, static_cast<std::uint32_t>(bitmap_words), 0};
-    }
+    constexpr iterator make_iterator(const std::uint32_t index) const noexcept { return iterator{this, next_allocated(index)}; }
 
 private:
     std::byte* memory_{};
@@ -346,6 +290,24 @@ private:
     std::array<std::uint64_t, bitmap_words> bitmap_{};
 
     constexpr void* index_to_ptr(const std::uint32_t index) const noexcept { return static_cast<void*>(memory_ + static_cast<std::size_t>(index) * BlockSize); }
+
+    /** @brief Index of the lowest set bit of `word`, the `word_idx`-th bitmap word. */
+    static constexpr std::uint32_t first_in(const std::size_t word_idx, const std::uint64_t word) noexcept {
+        return static_cast<std::uint32_t>(word_idx * bitmap_word_bits + static_cast<std::size_t>(std::countr_zero(word)));
+    }
+
+    /** @brief Index of the first allocated block at or after `from`, or `capacity` if none. */
+    constexpr std::uint32_t next_allocated(const std::uint32_t from) const noexcept {
+        const std::size_t word_idx{from / bitmap_word_bits};
+        if (word_idx >= bitmap_words) {
+            return capacity;
+        }
+        if (const std::uint64_t rest{bitmap_[word_idx] & (~std::uint64_t{0} << (from % bitmap_word_bits))}) {
+            return first_in(word_idx, rest);
+        }
+        const auto hit{std::ranges::find_if(bitmap_ | std::views::drop(word_idx + 1), [](const std::uint64_t word) { return word != 0; })};
+        return hit == bitmap_.end() ? capacity : first_in(static_cast<std::size_t>(hit - bitmap_.begin()), *hit);
+    }
 
     constexpr std::uint32_t ptr_to_index(const void* ptr) const noexcept {
         return static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
