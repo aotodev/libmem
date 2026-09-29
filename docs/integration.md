@@ -25,7 +25,7 @@ include(FetchContent)
 FetchContent_Declare(
     libmem
     GIT_REPOSITORY https://github.com/aotodev/libmem.git
-    GIT_TAG v0.9.1
+    GIT_TAG v0.10.0
     SYSTEM
 )
 FetchContent_MakeAvailable(libmem)
@@ -73,7 +73,7 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_MODULE_STD ON)
 
-find_package(libmem 0.9 REQUIRED)
+find_package(libmem 0.10 REQUIRED)
 
 target_link_libraries(my_target PRIVATE libmem::libmem)
 ```
