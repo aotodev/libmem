@@ -4,9 +4,9 @@
  * @file fuzz_support.h
  * @brief Shared plumbing for the libFuzzer harnesses.
  *
- * The input reader, the invariant-check macro, and a byte-counting
+ * The input reader, the invariant-check macro, a byte-counting
  * `memory_resource` used by every target to prove teardown returns everything it
- * took.
+ * took, and the harnesses' record of what is live.
  */
 #pragma once
 
@@ -15,6 +15,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <new>
+#include <unordered_map>
+#include <vector>
 
 /** @brief Abort with the failing expression; libFuzzer records the input. */
 #define FUZZ_CHECK(cond)                                                                                                                                       \
@@ -91,6 +93,43 @@ struct counting_resource {
         s->live_bytes -= size;
         ::operator delete(ptr, size, std::align_val_t{align});
     }
+};
+
+/** @brief The harness's record of live keys: O(1) insert, erase, lookup and uniform pick. */
+template <typename K> class live_set {
+public:
+    bool contains(const K& key) const { return index_.contains(key); }
+    std::size_t size() const { return keys_.size(); }
+    bool empty() const { return keys_.empty(); }
+    const std::vector<K>& keys() const { return keys_; }
+
+    /** @return `false` when `key` is already live. */
+    bool insert(const K& key) {
+        if (!index_.emplace(key, keys_.size()).second) {
+            return false;
+        }
+        keys_.push_back(key);
+        return true;
+    }
+
+    void erase(const K& key) {
+        const auto it{index_.find(key)};
+        FUZZ_CHECK(it != index_.end());
+        const std::size_t i{it->second};
+        index_.erase(it);
+        if (i + 1 != keys_.size()) {
+            keys_[i] = keys_.back();
+            index_[keys_[i]] = i;
+        }
+        keys_.pop_back();
+    }
+
+    /** @pre `!empty()`. */
+    const K& pick(reader& r) const { return keys_[r.range(0, static_cast<std::uint32_t>(keys_.size() - 1))]; }
+
+private:
+    std::vector<K> keys_{};
+    std::unordered_map<K, std::size_t> index_{};
 };
 
 /** @brief Assert the resource handed back every byte it gave out. */

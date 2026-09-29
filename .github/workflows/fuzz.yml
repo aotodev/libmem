@@ -32,6 +32,8 @@ jobs:
           cmake --build build-fuzz -j
       - name: Smoke-run multislab fuzzer
         run: ./build-fuzz/fuzz/fuzz_multislab -max_total_time=60 -print_final_stats=1
+      - name: Smoke-run pool fuzzer
+        run: ./build-fuzz/fuzz/fuzz_pool -max_total_time=45 -print_final_stats=1
       - name: Smoke-run sparse_set fuzzer
         run: ./build-fuzz/fuzz/fuzz_sparse_set -max_total_time=45 -print_final_stats=1
       - name: Smoke-run sparse_map fuzzer

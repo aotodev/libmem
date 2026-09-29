@@ -109,7 +109,7 @@ To use it from another project, see [docs/integration.md](docs/integration.md).
 CI builds and runs the suite with **both GCC and Clang** on every push, in both
 **`c++26` and `gnu++26`**, under **AddressSanitizer + UndefinedBehaviorSanitizer**,
 with the ring handoff also run under **ThreadSanitizer**. Coverage-guided **libFuzzer** harnesses drive
-`multislab`, `sparse_set`, and `sparse_map`; the two sparse ones are differential,
+`multislab`, `pool`, `sparse_set`, and `sparse_map`; the two sparse ones are differential,
 comparing every operation against a standard container.
 
 This is an early-stage library, so treat that as what is exercised today rather

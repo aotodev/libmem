@@ -4,30 +4,25 @@
  * @file fuzz_multislab.cpp
  * @brief Coverage-guided fuzzer for `libmem::multislab`.
  *
- * Interprets the libFuzzer input as a config header (which compile-time
- * `BlocksPerSlab` instantiation to drive, plus a runtime max-slab cap) followed
- * by an alloc/release opcode stream. Only valid operations are issued (releases
- * always target a currently-live block), so the allocator's defensive asserts
- * are never tripped; ASan, UBSan, and the structural invariants below surface
- * the bugs.
+ * A config header picks a compile-time `BlocksPerSlab`, a runtime slab cap and a
+ * hysteresis reserve; the rest is an opcode stream of allocations, releases (by
+ * pointer and by iterator), and traversals that mutate the allocator as they go.
+ * Only valid operations are issued, so the allocator's asserts never fire.
  *
- * Invariants (checked after every operation):
- *   - allocations never alias a still-live block, and are owned by the allocator;
- *   - the number of blocks reachable by iteration equals the number we hold live;
- *   - empty_slab_count() never exceeds slab_count().
- * On teardown a counting memory_resource verifies destroy() returns every byte.
- *
- * The iteration-count invariant is what catches the lazy full-list corruption
- * class of bug (a lost slab makes the live count diverge); this drives it across
- * random block sizes, caps, and interleavings.
+ * Invariants:
+ *   - an allocation succeeds iff the cap leaves room, and never aliases a live block;
+ *   - `begin()` reaches exactly the live blocks; `empty_slab_count() <= slab_count()`;
+ *   - a traversal that releases and allocates while it walks visits only live blocks,
+ *     none twice, and every block live for the whole walk exactly once;
+ *   - an `allocate_at` iterator held across operations still starts at its block;
+ *   - teardown returns every byte to the resource.
  */
+#include "fuzz_support.h"
+
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <new>
 #include <ranges>
-#include <vector>
+#include <unordered_set>
 
 import libmem;
 
@@ -36,128 +31,168 @@ using libmem::threshold_policy;
 
 namespace {
 
-#define FUZZ_CHECK(cond)                                                                                                                                       \
-    do {                                                                                                                                                       \
-        if (!(cond)) {                                                                                                                                         \
-            std::fprintf(stderr, "FUZZ INVARIANT FAILED: %s (%s:%d)\n", #cond, __FILE__, __LINE__);                                                            \
-            std::abort();                                                                                                                                      \
-        }                                                                                                                                                      \
-    } while (false)
-
-/* Byte-stream reader: yields zero once exhausted so the harness can drain input
- * with a simple `while (more())` loop. */
-struct reader {
-    const std::uint8_t* data;
-    std::size_t size;
-    std::size_t pos{0};
-
-    std::uint8_t u8() { return pos < size ? data[pos++] : std::uint8_t{0}; }
-
-    std::uint32_t u32() {
-        std::uint32_t v{0};
-        for (int i{0}; i < 4; ++i) {
-            v = (v << 8) | u8();
-        }
-        return v;
-    }
-
-    std::uint32_t range(const std::uint32_t lo, const std::uint32_t hi) { return hi <= lo ? lo : lo + (u32() % (hi - lo + 1)); }
-
-    bool more() const { return pos < size; }
-};
-
-struct stats {
-    std::size_t live_bytes{0};
-    std::size_t allocs{0};
-    std::size_t frees{0};
-};
-
-struct counting_resource {
-    stats* s{};
-
-    void* allocate(const std::size_t size) {
-        ++s->allocs;
-        s->live_bytes += size;
-        return ::operator new(size);
-    }
-
-    void deallocate(void* ptr, const std::size_t size) noexcept {
-        ++s->frees;
-        s->live_bytes -= size;
-        ::operator delete(ptr, size);
-    }
-
-    /* multislab takes its slab memory through these, so a resource backing one must be an
-     * aligned_memory_resource. */
-    void* allocate(const std::size_t size, const std::size_t align) {
-        ++s->allocs;
-        s->live_bytes += size;
-        return ::operator new(size, std::align_val_t{align});
-    }
-
-    void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept {
-        ++s->frees;
-        s->live_bytes -= size;
-        ::operator delete(ptr, size, std::align_val_t{align});
-    }
-};
-
 constexpr std::size_t live_cap{1024};
 
-template <std::uint32_t BlocksPerSlab> void run(reader& r) {
-    using ms_t = multislab<libmem::cache_line_size, BlocksPerSlab, counting_resource, threshold_policy>;
+template <std::uint32_t BlocksPerSlab> class harness {
+    using multislab_type = multislab<libmem::cache_line_size, BlocksPerSlab, fuzz::counting_resource, threshold_policy>;
 
-    stats st{};
-    const std::uint32_t max_slabs{r.range(0, 6)}; // 0 = unlimited
-    const std::uint32_t reserve{r.range(0, 3)};   // hysteresis reserve
+public:
+    harness(fuzz::reader& r, fuzz::stats& st, const std::uint32_t max_slabs, const std::uint32_t reserve)
+        : r_{r}, max_slabs_{max_slabs}, ms_{max_slabs, fuzz::counting_resource{&st}, threshold_policy{.max_empty_reserve = reserve}} {}
 
-    {
-        ms_t ms{max_slabs, counting_resource{&st}, threshold_policy{.max_empty_reserve = reserve}};
-
-        std::vector<void*> live{};
-
-        while (r.more()) {
-            const std::uint8_t op{r.u8()};
-
-            if ((op & 1u) == 0u) {
-                if (live.size() < live_cap) {
-                    void* p{ms.allocate()};
-                    if (p) {
-                        for (void* q : live) {
-                            FUZZ_CHECK(q != p); // must not alias a live block
-                        }
-                        live.push_back(p);
-                    }
-                }
-            } else if (!live.empty()) {
-                const std::size_t idx{r.u8() % live.size()};
-                ms.deallocate(live[idx]);
-                live[idx] = live.back();
-                live.pop_back();
+    void run() {
+        while (r_.more()) {
+            switch (r_.u8() % 6u) {
+            case 0:
+            case 1:
+                allocate();
+                break;
+            case 2:
+            case 3:
+                release_any(nullptr);
+                break;
+            case 4:
+                walk();
+                break;
+            default:
+                hold();
+                break;
             }
-
-            /* the blocks reachable by iteration must be exactly those we hold */
-            const auto reachable{std::ranges::distance(ms.begin(), ms.end())};
-            FUZZ_CHECK(static_cast<std::size_t>(reachable) == live.size());
-            FUZZ_CHECK(ms.empty_slab_count() <= ms.slab_count());
+            check();
         }
 
-        for (void* p : live) {
-            ms.deallocate(p);
+        for (void* p : live_.keys()) {
+            ms_.deallocate(p);
         }
-        ms.destroy();
-
-        FUZZ_CHECK(st.allocs == st.frees);
-        FUZZ_CHECK(st.live_bytes == 0);
+        ms_.destroy();
     }
+
+private:
+    fuzz::reader& r_;
+    std::uint32_t max_slabs_;
+    multislab_type ms_;
+    fuzz::live_set<void*> live_{};
+    /* Everything released during the current walk; a reused address is not "live throughout". */
+    std::unordered_set<void*> released_{};
+
+    bool has_room() const { return max_slabs_ == 0 || live_.size() < std::size_t{max_slabs_} * BlocksPerSlab; }
+
+    void allocate() {
+        if (live_.size() >= live_cap) {
+            return;
+        }
+        const bool room{has_room()};
+        void* p{ms_.allocate()};
+        FUZZ_CHECK((p != nullptr) == room);
+        if (p) {
+            FUZZ_CHECK(live_.insert(p)); // aliasing a live block fails the insert
+        }
+    }
+
+    void release(void* p) {
+        if (r_.u8() & 1u) {
+            ms_.deallocate(ms_.make_iterator(p));
+        } else {
+            ms_.deallocate(p);
+        }
+        live_.erase(p);
+        released_.insert(p);
+    }
+
+    /** @brief Release a random live block other than `keep`. */
+    void release_any(const void* keep) {
+        if (live_.empty()) {
+            return;
+        }
+        void* p{live_.pick(r_)};
+        if (p != keep) {
+            release(p);
+        }
+    }
+
+    /* Erase-while-iterating, plus allocations and releases elsewhere, one per step. */
+    void walk() {
+        const auto before{live_.keys()};
+        std::unordered_set<void*> seen{};
+        released_.clear();
+
+        for (auto it{ms_.begin()}; it != ms_.end();) {
+            void* const p{*it};
+            FUZZ_CHECK(live_.contains(p));
+            FUZZ_CHECK(seen.insert(p).second);
+            ++it;
+            switch (r_.u8() % 4u) {
+            case 0:
+                release(p);
+                break;
+            case 1:
+                allocate();
+                break;
+            case 2:
+                release_any(it == ms_.end() ? nullptr : *it);
+                break;
+            default:
+                break;
+            }
+        }
+
+        for (void* p : before) {
+            FUZZ_CHECK(released_.contains(p) || seen.contains(p));
+        }
+    }
+
+    void hold() {
+        if (live_.size() >= live_cap) {
+            return;
+        }
+        const bool room{has_room()};
+        const auto held{ms_.allocate_at()};
+        FUZZ_CHECK((held.ptr != nullptr) == room);
+        if (!held.ptr) {
+            return;
+        }
+        FUZZ_CHECK(live_.insert(held.ptr));
+
+        for (std::uint32_t n{r_.range(1, 8)}; n > 0 && r_.more(); --n) {
+            if (r_.u8() & 1u) {
+                allocate();
+            } else {
+                release_any(held.ptr);
+            }
+        }
+
+        auto it{held.it};
+        FUZZ_CHECK(*it == held.ptr);
+        std::unordered_set<void*> seen{};
+        for (; it != ms_.end(); ++it) {
+            FUZZ_CHECK(live_.contains(*it));
+            FUZZ_CHECK(seen.insert(*it).second);
+        }
+    }
+
+    void check() {
+        FUZZ_CHECK(static_cast<std::size_t>(std::ranges::distance(ms_.begin(), ms_.end())) == live_.size());
+        FUZZ_CHECK(ms_.empty_slab_count() <= ms_.slab_count());
+        FUZZ_CHECK(max_slabs_ == 0 || ms_.slab_count() <= max_slabs_);
+    }
+};
+
+template <std::uint32_t BlocksPerSlab> void run(fuzz::reader& r) {
+    fuzz::stats st{};
+    const std::uint32_t max_slabs{r.range(0, 6)}; // 0 = unlimited
+    const std::uint32_t reserve{r.range(0, 3)};
+    {
+        harness<BlocksPerSlab> h{r, st, max_slabs, reserve};
+        h.run();
+    }
+    fuzz::check_balanced(st);
 }
 
 } // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
-    reader r{data, size};
+    fuzz::reader r{data, size};
 
-    /* dispatch over a handful of compile-time block-per-slab instantiations */
     switch (r.u8() % 5u) {
     case 0:
         run<1>(r);
