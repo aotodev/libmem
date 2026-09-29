@@ -299,3 +299,22 @@ TEST(PoolTest, iterator_from_emplace_is_traversable) {
     EXPECT_GE(reachable, 1u);
     EXPECT_LE(reachable, p.size());
 }
+
+/* The erase-while-iterating idiom across several full slabs. */
+TEST(PoolTest, erase_while_iterating_visits_every_element_once) {
+    pool<std::int32_t, 4> p{};
+    for (std::int32_t i{0}; i < 12; ++i) {
+        p.insert(i);
+    }
+
+    std::vector<std::int32_t> visited{};
+    for (auto it{p.begin()}; it != p.end();) {
+        visited.push_back(*it);
+        it = (*it % 2 == 0) ? p.erase(it) : std::next(it);
+    }
+
+    std::ranges::sort(visited);
+    EXPECT_EQ(visited, (std::ranges::iota_view{0, 12} | std::ranges::to<std::vector>()));
+    EXPECT_EQ(p.size(), 6u);
+    EXPECT_TRUE(std::ranges::none_of(p, [](const std::int32_t v) { return v % 2 == 0; }));
+}

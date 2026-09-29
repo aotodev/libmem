@@ -35,7 +35,7 @@ import std;
 namespace libmem {
 
 /* ============================================================================
- * Slab node: intrusive doubly-linked list element
+ * Slab node: element of two intrusive doubly-linked lists
  * ============================================================================ */
 
 namespace detail {
@@ -43,17 +43,23 @@ namespace detail {
 template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, std::size_t BlockAlign> struct slab_node {
     using slab_type = slab<BlockSize, BlocksPerSlab, BlockAlign>;
 
+    struct link {
+        slab_node* next{};
+        slab_node* prev{};
+    };
+
     slab_type allocator;
-    slab_node* next{};
-    slab_node* prev{};
+    /* `active_` or `full_`; relinked whenever the node fills or gains a free slot. */
+    link space{};
+    /* Every node, in iteration order; relinked only on grow and free, so live
+     * iterators survive `space` moves. */
+    link all{};
     std::uint32_t used{};
     void* raw_memory{};
-    /* Which intrusive list the node currently lives on. Tracked explicitly
-     * because a slab can be full (`used == BlocksPerSlab`) while still on the
-     * active list; full slabs are migrated lazily, on the next allocation. */
-    bool on_full{false};
 
     slab_node(void* mem, const std::size_t mem_size) noexcept : allocator{mem, mem_size}, raw_memory{mem} {}
+
+    constexpr bool full() const noexcept { return used == BlocksPerSlab; }
 };
 
 } // namespace detail
@@ -70,9 +76,10 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, std::size_t BlockA
  * @tparam Resource      Backing memory resource (must satisfy `memory_resource`).
  * @tparam Policy        Shrink policy (must satisfy `shrink_policy`).
  *
- * Maintains two intrusive lists: `active` (slabs with free space) and `full`
- * (completely allocated slabs). On deallocation, full slabs are moved back to
- * active; empty slabs are released based on the shrink policy.
+ * Every slab on `active_` has a free slot: a slab moves to `full_` on the
+ * allocation that fills it and back on the next deallocation. Empty slabs are
+ * released based on the shrink policy. Iteration follows a separate list, so
+ * neither move disturbs a live iterator.
  */
 export template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy,
     std::size_t BlockAlign = default_alignment>
@@ -115,15 +122,16 @@ public:
     multislab& operator=(const multislab&) = delete;
 
     constexpr multislab(multislab&& other) noexcept
-        : resource_{std::move(other.resource_)}, policy_{std::move(other.policy_)}, active_{std::exchange(other.active_, nullptr)},
-          full_{std::exchange(other.full_, nullptr)}, slab_count_{std::exchange(other.slab_count_, 0)}, max_slabs_{other.max_slabs_},
-          empty_count_{std::exchange(other.empty_count_, 0)} {}
+        : resource_{std::move(other.resource_)}, policy_{std::move(other.policy_)}, nodes_{std::exchange(other.nodes_, nullptr)},
+          active_{std::exchange(other.active_, nullptr)}, full_{std::exchange(other.full_, nullptr)}, slab_count_{std::exchange(other.slab_count_, 0)},
+          max_slabs_{other.max_slabs_}, empty_count_{std::exchange(other.empty_count_, 0)} {}
 
     constexpr multislab& operator=(multislab&& other) noexcept {
         if (this != &other) {
             destroy_all();
             resource_ = std::move(other.resource_);
             policy_ = std::move(other.policy_);
+            nodes_ = std::exchange(other.nodes_, nullptr);
             active_ = std::exchange(other.active_, nullptr);
             full_ = std::exchange(other.full_, nullptr);
             slab_count_ = std::exchange(other.slab_count_, 0);
@@ -155,19 +163,12 @@ public:
         node_type* node{find_owner(ptr)};
         assert(node != nullptr && "pointer not owned by this allocator");
 
-        /* Use the tracked list membership, not the used-count: a full-by-count
-         * slab can still be on the active list, and treating it as full here
-         * would run the full->active relink on a node that is already active,
-         * corrupting both lists. */
-        const bool was_full{node->on_full};
+        if (node->full()) [[unlikely]] {
+            move_to_active(node);
+        }
 
         node->allocator.deallocate(ptr);
         node->used--;
-
-        /* If it was full, move back to the active list. */
-        if (was_full) [[unlikely]] {
-            move_to_active(node);
-        }
 
         /* Became empty: apply shrink policy. */
         if (node->used == 0) [[unlikely]] {
@@ -216,17 +217,13 @@ public:
 
         constexpr iterator() noexcept = default;
 
-        /** @brief Construct positioned at the first allocated block in `list`. */
-        constexpr iterator(node_type* list_head, node_type* second_list) noexcept : current_node_{list_head}, second_list_{second_list} {
-            advance_to_valid_node();
-        }
-
     private:
         using slab_iterator = typename slab_type::iterator;
 
-        /** @brief Construct from fully specified state (used by `multislab::make_iterator`). */
-        constexpr iterator(node_type* node, node_type* second_list, slab_iterator slab_iter, bool on_second) noexcept
-            : current_node_{node}, second_list_{second_list}, slab_iter_{slab_iter}, on_second_list_{on_second} {}
+        /** @brief Positioned at the first allocated block at or after `node`. */
+        constexpr explicit iterator(node_type* node) noexcept : node_{node} { settle(); }
+
+        constexpr iterator(node_type* node, slab_iterator slab_iter) noexcept : node_{node}, slab_iter_{slab_iter} {}
 
     public:
         constexpr void* operator*() const noexcept { return *slab_iter_; }
@@ -234,8 +231,8 @@ public:
         constexpr iterator& operator++() noexcept {
             ++slab_iter_;
             if (slab_iter_ == std::default_sentinel) {
-                /* Advance to the next slab node. */
-                advance_node();
+                node_ = node_->all.next;
+                settle();
             }
             return *this;
         }
@@ -246,70 +243,29 @@ public:
             return tmp;
         }
 
-        constexpr bool operator==(std::default_sentinel_t) const noexcept { return current_node_ == nullptr; }
+        constexpr bool operator==(std::default_sentinel_t) const noexcept { return node_ == nullptr; }
 
         friend constexpr bool operator==(std::default_sentinel_t s, const iterator& it) noexcept { return it == s; }
 
-        /**
-         * @brief Iterator-to-iterator equality.
-         *
-         * Two iterators compare equal when they reference the same slab
-         * node and either both reached their end state or both currently
-         * dereference to the same allocated block.
-         */
-        constexpr bool operator==(const iterator& rhs) const noexcept {
-            if (current_node_ != rhs.current_node_) {
-                return false;
-            }
-            if (!current_node_) {
-                return true;
-            }
-            return slab_iter_ == rhs.slab_iter_;
-        }
+        /** @brief Equal when both are at the same block, or both at the end. */
+        constexpr bool operator==(const iterator&) const noexcept = default;
 
     private:
-        node_type* current_node_{};
-        node_type* second_list_{};
+        node_type* node_{};
+        /* Default-constructed at the end, so defaulted equality holds there. */
         slab_iterator slab_iter_{};
-        bool on_second_list_{false};
 
-        constexpr void advance_to_valid_node() noexcept {
-            /* If the primary (active) list is empty, start on the second (full)
-             * list; otherwise iteration over an all-full multislab would yield
-             * nothing even though every block is live. */
-            if (!current_node_ && !on_second_list_) {
-                current_node_ = second_list_;
-                on_second_list_ = true;
+        /** @brief Skip nodes with no allocated block; lands on a block or at the end. */
+        constexpr void settle() noexcept {
+            while (node_ && node_->used == 0) {
+                node_ = node_->all.next;
             }
-
-            /* Skip empty nodes, find first with content. */
-            while (current_node_) {
-                if (current_node_->used > 0) {
-                    slab_iter_ = current_node_->allocator.begin();
-                    if (slab_iter_ != std::default_sentinel) {
-                        return;
-                    }
-                }
-                current_node_ = current_node_->next;
-                if (!current_node_ && !on_second_list_) {
-                    current_node_ = second_list_;
-                    on_second_list_ = true;
-                }
-            }
-        }
-
-        constexpr void advance_node() noexcept {
-            current_node_ = current_node_->next;
-            if (!current_node_ && !on_second_list_) {
-                current_node_ = second_list_;
-                on_second_list_ = true;
-            }
-            advance_to_valid_node();
+            slab_iter_ = node_ ? node_->allocator.begin() : slab_iterator{};
         }
     };
 
-    /** @brief Begin iterator over all allocated blocks (active list, then full list). */
-    constexpr iterator begin() const noexcept { return iterator{active_, full_}; }
+    /** @brief Begin iterator over all allocated blocks. */
+    constexpr iterator begin() const noexcept { return iterator{nodes_}; }
 
     /** @brief Sentinel end. */
     static constexpr std::default_sentinel_t end() noexcept { return {}; }
@@ -318,7 +274,7 @@ public:
      * @brief Build an iterator positioned at the allocated block `ptr`.
      *
      * Subsequent increments walk the remaining allocated blocks in the
-     * same traversal order as `begin()` (active list, then full list).
+     * same traversal order as `begin()`.
      *
      * @pre `ptr` was returned by this multislab's `allocate()` and is
      *      currently live.
@@ -377,6 +333,7 @@ public:
 private:
     Resource resource_{};
     Policy policy_{};
+    node_type* nodes_{};
     node_type* active_{};
     node_type* full_{};
     std::uint32_t slab_count_{};
@@ -401,53 +358,25 @@ private:
      * without re-deriving what we already knew.
      */
     raw_allocation allocate_raw() {
-        if (!active_) [[unlikely]] {
-            if (!grow()) {
-                return {};
-            }
-        }
-
-        node_type* node{active_};
-        auto alloc{node->allocator.allocate_at()};
-
-        if (!alloc.ptr) [[unlikely]] {
-            /* This node is full; move it to the full list. */
-            move_to_full(node);
-
-            /* Grow a new slab and retry. */
-            if (!grow()) {
-                return {};
-            }
-            node = active_;
-            alloc = node->allocator.allocate_at();
-        }
-
-        if (alloc.ptr) [[likely]] {
-            node->used++;
-            if (node->used == 1) {
-                /* Was empty, no longer empty. */
-                if (empty_count_ > 0) {
-                    --empty_count_;
-                }
-            }
-        } else [[unlikely]] {
+        if (!active_ && !grow()) [[unlikely]] {
             return {};
         }
 
+        node_type* node{active_};
+        const auto alloc{node->allocator.allocate_at()};
+        assert(alloc.ptr != nullptr && "a slab on the active list has no free slot");
+
+        if (node->used++ == 0) {
+            --empty_count_;
+        }
+        if (node->full()) {
+            move_to_full(node);
+        }
         return {alloc.ptr, node, alloc.index};
     }
 
-    /**
-     * @brief Build an iterator at `index` within `node`.
-     *
-     * `node->on_full` is the authoritative record of which intrusive list owns
-     * the node (the used-count is not: a full-by-count slab can still sit on the
-     * active list). A node on `full_` is already past the "second list" stage, so
-     * it carries no second list of its own.
-     */
-    iterator iterator_at(node_type* node, const std::uint32_t index) const noexcept {
-        return iterator{node, node->on_full ? nullptr : full_, node->allocator.make_iterator(index), node->on_full};
-    }
+    /** @brief Build an iterator at `index` within `node`. */
+    iterator iterator_at(node_type* node, const std::uint32_t index) const noexcept { return iterator{node, node->allocator.make_iterator(index)}; }
 
     /**
      * @brief Alignment the slab's backing memory is taken at.
@@ -501,16 +430,9 @@ private:
             return false;
         }
 
-        /* Placement-new the node. */
         auto* node{::new (node_mem) node_type{slab_mem, slab_memory_size}};
-
-        /* Prepend to the active list. */
-        node->next = active_;
-        node->prev = nullptr;
-        if (active_) {
-            active_->prev = node;
-        }
-        active_ = node;
+        push_front<&node_type::space>(active_, node);
+        push_front<&node_type::all>(nodes_, node);
 
         slab_count_++;
         /* The new slab is empty. */
@@ -518,78 +440,57 @@ private:
         return true;
     }
 
-    void move_to_full(node_type* node) noexcept {
-        /* Unlink from the active list. */
-        if (node->prev) {
-            node->prev->next = node->next;
-        } else {
-            active_ = node->next;
+    template <auto Link> static constexpr void push_front(node_type*& head, node_type* node) noexcept {
+        node->*Link = {head, nullptr};
+        if (head) {
+            (head->*Link).prev = node;
         }
-        if (node->next) {
-            node->next->prev = node->prev;
-        }
+        head = node;
+    }
 
-        /* Prepend to the full list. */
-        node->next = full_;
-        node->prev = nullptr;
-        if (full_) {
-            full_->prev = node;
+    template <auto Link> static constexpr void unlink(node_type*& head, node_type* node) noexcept {
+        const auto [next, prev]{node->*Link};
+        if (prev) {
+            (prev->*Link).next = next;
+        } else {
+            head = next;
         }
-        full_ = node;
-        node->on_full = true;
+        if (next) {
+            (next->*Link).prev = prev;
+        }
+    }
+
+    void move_to_full(node_type* node) noexcept {
+        unlink<&node_type::space>(active_, node);
+        push_front<&node_type::space>(full_, node);
     }
 
     void move_to_active(node_type* node) noexcept {
-        /* Unlink from the full list. */
-        if (node->prev) {
-            node->prev->next = node->next;
-        } else {
-            full_ = node->next;
-        }
-        if (node->next) {
-            node->next->prev = node->prev;
-        }
-
-        /* Prepend to the active list. */
-        node->next = active_;
-        node->prev = nullptr;
-        if (active_) {
-            active_->prev = node;
-        }
-        active_ = node;
-        node->on_full = false;
+        unlink<&node_type::space>(full_, node);
+        push_front<&node_type::space>(active_, node);
     }
 
+    /** @pre `node` is empty, hence on `active_`. */
     void unlink_and_free(node_type* node) noexcept {
-        /* Unlink from the active list. */
-        if (node->prev) {
-            node->prev->next = node->next;
-        } else {
-            active_ = node->next;
-        }
-        if (node->next) {
-            node->next->prev = node->prev;
-        }
-
-        void* raw{node->raw_memory};
-        node->~node_type();
-        free_slab_memory(raw);
-        resource_.deallocate(node, sizeof(node_type));
+        unlink<&node_type::space>(active_, node);
+        unlink<&node_type::all>(nodes_, node);
+        free_node(node);
 
         slab_count_--;
         empty_count_--;
     }
 
+    void free_node(node_type* node) noexcept {
+        void* raw{node->raw_memory};
+        node->~node_type();
+        free_slab_memory(raw);
+        resource_.deallocate(node, sizeof(node_type));
+    }
+
     node_type* find_owner(const void* ptr) const noexcept {
         const auto p{reinterpret_cast<std::uintptr_t>(ptr)};
 
-        for (node_type* n{active_}; n; n = n->next) {
-            const auto base{reinterpret_cast<std::uintptr_t>(n->raw_memory)};
-            if (p >= base && p < base + slab_memory_size) {
-                return n;
-            }
-        }
-        for (node_type* n{full_}; n; n = n->next) {
+        for (node_type* n{nodes_}; n; n = n->all.next) {
             const auto base{reinterpret_cast<std::uintptr_t>(n->raw_memory)};
             if (p >= base && p < base + slab_memory_size) {
                 return n;
@@ -598,20 +499,10 @@ private:
         return nullptr;
     }
 
-    void free_list(node_type* head) noexcept {
-        while (head) {
-            node_type* next{head->next};
-            void* raw{head->raw_memory};
-            head->~node_type();
-            free_slab_memory(raw);
-            resource_.deallocate(head, sizeof(node_type));
-            head = next;
-        }
-    }
-
     void destroy_all() noexcept {
-        free_list(active_);
-        free_list(full_);
+        while (nodes_) {
+            free_node(std::exchange(nodes_, nodes_->all.next));
+        }
         active_ = nullptr;
         full_ = nullptr;
         slab_count_ = 0;

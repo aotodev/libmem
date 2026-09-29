@@ -8,6 +8,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -304,10 +305,8 @@ TEST(MultislabTest, allocate_at_yields_end_iterator_when_exhausted) {
 }
 
 /*
- * make_iterator() decides whether a node sits on the full list from the node's
- * own on_full flag rather than by scanning full_. Pin every block of a capped,
- * completely full multislab so the owning node really is on the full list, and
- * check the iterator still walks the remaining blocks correctly.
+ * Pin every block of a capped, completely full multislab so the owning node is
+ * on the full list, and check make_iterator() still walks the remaining blocks.
  */
 TEST(MultislabTest, make_iterator_handles_nodes_on_the_full_list) {
     constexpr std::uint32_t per_slab{4};
@@ -318,7 +317,7 @@ TEST(MultislabTest, make_iterator_handles_nodes_on_the_full_list) {
         b = ms.allocate();
         ASSERT_NE(b, nullptr);
     }
-    ASSERT_EQ(ms.allocate(), nullptr); // provokes the move to the full list
+    ASSERT_EQ(ms.allocate(), nullptr);
 
     /* From the first block, iteration must still reach all four. */
     const auto visited{std::ranges::distance(ms.make_iterator(blocks[0]), ms.end())};
@@ -329,5 +328,142 @@ TEST(MultislabTest, make_iterator_handles_nodes_on_the_full_list) {
 
     for (auto* b : blocks) {
         ms.deallocate(b);
+    }
+}
+
+/*
+ * Erase-while-iterating across full slabs. Each release from a full slab moves
+ * it back to the active list; the traversal must not follow that move.
+ */
+TEST(MultislabTest, releasing_during_iteration_visits_every_block_once) {
+    constexpr std::uint32_t per_slab{4};
+    multislab<block, per_slab> ms{};
+
+    std::vector<void*> blocks(3 * per_slab);
+    for (auto& b : blocks) {
+        b = ms.allocate();
+        ASSERT_NE(b, nullptr);
+    }
+
+    std::vector<void*> visited{};
+    for (auto it{ms.begin()}; it != ms.end();) {
+        void* p{*it};
+        ++it;
+        visited.push_back(p);
+        ms.deallocate(p);
+    }
+
+    std::ranges::sort(visited);
+    std::ranges::sort(blocks);
+    EXPECT_EQ(visited, blocks);
+    EXPECT_EQ(ms.begin(), ms.end());
+}
+
+/*
+ * Allocating during iteration fills a slab and moves it to the full list. Blocks
+ * live before the traversal are visited exactly once; new ones at most once.
+ */
+TEST(MultislabTest, allocating_during_iteration_visits_existing_blocks_once) {
+    constexpr std::uint32_t per_slab{4};
+    multislab<block, per_slab> ms{};
+
+    std::vector<void*> before(3 * per_slab - 1);
+    for (auto& b : before) {
+        b = ms.allocate();
+        ASSERT_NE(b, nullptr);
+    }
+
+    std::vector<void*> added{};
+    std::vector<void*> visited{};
+    for (auto it{ms.begin()}; it != ms.end(); ++it) {
+        visited.push_back(*it);
+        if (added.size() < 2) {
+            added.push_back(ms.allocate());
+        }
+    }
+
+    for (void* b : before) {
+        EXPECT_EQ(std::ranges::count(visited, b), 1);
+    }
+    for (void* a : added) {
+        EXPECT_LE(std::ranges::count(visited, a), 1);
+    }
+    EXPECT_LE(visited.size(), before.size() + added.size());
+
+    for (void* p : before) {
+        ms.deallocate(p);
+    }
+    for (void* p : added) {
+        ms.deallocate(p);
+    }
+}
+
+/*
+ * A held iterator must survive another slab being emptied and released. Under
+ * ASan this was a heap-use-after-free: the iterator kept a pointer to the head
+ * of the full list it saw at construction.
+ */
+TEST(MultislabTest, held_iterator_survives_another_slab_being_freed) {
+    constexpr std::uint32_t per_slab{4};
+    multislab<block, per_slab> ms{threshold_policy{.max_empty_reserve = 0}};
+
+    std::vector<void*> blocks(3 * per_slab);
+    for (auto& b : blocks) {
+        b = ms.allocate();
+        ASSERT_NE(b, nullptr);
+    }
+
+    /* blocks[4..7] fill the middle slab; release all of it while holding an
+     * iterator elsewhere. */
+    const std::vector<void*> released(blocks.begin() + per_slab, blocks.begin() + 2 * per_slab);
+    auto it{ms.begin()};
+    ASSERT_EQ(std::ranges::find(released, *it), released.end());
+
+    for (void* b : released) {
+        ms.deallocate(b);
+    }
+    ASSERT_EQ(ms.slab_count(), 2u);
+
+    std::size_t walked{0};
+    for (; it != ms.end(); ++it) {
+        ++walked;
+    }
+    EXPECT_GE(walked, 1u);
+    EXPECT_LE(walked, blocks.size() - per_slab);
+
+    for (void* b : blocks) {
+        if (std::ranges::find(released, b) == released.end()) {
+            ms.deallocate(b);
+        }
+    }
+}
+
+/* A freed slot on a slab below the active head is reused before growing. */
+TEST(MultislabTest, allocation_reuses_a_free_slot_before_growing) {
+    constexpr std::uint32_t per_slab{4};
+
+    for (const std::uint32_t cap : {0u, 2u}) {
+        multislab<block, per_slab> ms{cap};
+
+        std::vector<void*> blocks(per_slab + 1);
+        for (auto& b : blocks) {
+            b = ms.allocate();
+            ASSERT_NE(b, nullptr);
+        }
+        ASSERT_EQ(ms.slab_count(), 2u);
+
+        /* Free a slot in the full first slab, refill it, then allocate once more:
+         * the second slab still has free slots. */
+        ms.deallocate(blocks[0]);
+        blocks[0] = ms.allocate();
+        ASSERT_NE(blocks[0], nullptr);
+        void* extra{ms.allocate()};
+        ASSERT_NE(extra, nullptr) << "cap " << cap;
+        EXPECT_EQ(ms.slab_count(), 2u) << "cap " << cap;
+
+        ms.deallocate(extra);
+        for (void* b : blocks) {
+            ms.deallocate(b);
+        }
     }
 }
