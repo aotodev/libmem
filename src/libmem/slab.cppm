@@ -305,7 +305,9 @@ private:
         if (const std::uint64_t rest{bitmap_[word_idx] & (~std::uint64_t{0} << (from % bitmap_word_bits))}) {
             return first_in(word_idx, rest);
         }
-        const auto hit{std::ranges::find_if(bitmap_ | std::views::drop(word_idx + 1), [](const std::uint64_t word) { return word != 0; })};
+        /* Call form, not a pipe: Clang cannot find libstdc++'s adaptor operator| when a consumer instantiates this. */
+        const auto later{std::views::drop(bitmap_, static_cast<std::ptrdiff_t>(word_idx + 1))};
+        const auto hit{std::ranges::find_if(later, [](const std::uint64_t word) { return word != 0; })};
         return hit == bitmap_.end() ? capacity : first_in(static_cast<std::size_t>(hit - bitmap_.begin()), *hit);
     }
 
