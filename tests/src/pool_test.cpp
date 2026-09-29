@@ -346,3 +346,30 @@ TEST(PoolTest, emplace_rollback_releases_the_slot) {
     EXPECT_EQ(reused->v, 2);
     EXPECT_EQ(p.slab_count(), 1u);
 }
+
+TEST(PoolTest, erase_end_is_a_precondition_violation) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "checks compiled out";
+#else
+    pool<std::int32_t> p{};
+    p.insert(1);
+    EXPECT_DEATH(static_cast<void>(p.erase(pool<std::int32_t>::const_iterator{})), "erase\\(end\\(\\)\\)");
+#endif
+}
+
+/* `pool<int> p(4)` would otherwise be a slab cap spelled like a size. */
+static_assert(!std::constructible_from<pool<std::int32_t>, std::int32_t>);
+static_assert(!std::convertible_to<std::int32_t, libmem::slab_limit>);
+static_assert(std::constructible_from<pool<std::int32_t>, libmem::slab_limit>);
+static_assert(libmem::slab_limit{4}.value == 4u);
+
+TEST(PoolTest, slab_limit_rejects_counts_outside_uint32) {
+#ifdef NDEBUG
+    GTEST_SKIP() << "checks compiled out";
+#else
+    const std::int64_t negative{-1};
+    const std::int64_t too_large{std::int64_t{1} << 32};
+    EXPECT_DEATH(static_cast<void>(libmem::slab_limit{negative}), "must fit");
+    EXPECT_DEATH(static_cast<void>(libmem::slab_limit{too_large}), "must fit");
+#endif
+}

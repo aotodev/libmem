@@ -21,7 +21,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:concepts;
 
@@ -77,12 +77,19 @@ concept valid_alignment = power_of_two<N>;
 export template <std::size_t Size, std::size_t Align>
 concept valid_block_geometry = (Size > 0) && valid_alignment<Align> && (Size % Align == 0);
 
+/** @brief A valid block geometry for `Count > 0` blocks whose total size fits in `std::size_t`. */
+export template <std::size_t Size, std::uint32_t Count, std::size_t Align>
+concept valid_slab_geometry = valid_block_geometry<Size, Align> && (Count > 0) && (Count <= std::numeric_limits<std::size_t>::max() / Size);
+
 static_assert(valid_block_geometry<sizeof(std::max_align_t), alignof(std::max_align_t)>);
 static_assert(valid_block_geometry<4, 4>);
 static_assert(!valid_block_geometry<4, 8>);
 static_assert(!valid_block_geometry<24, 16>);
 static_assert(!valid_alignment<0>);
 static_assert(!valid_alignment<24>);
+static_assert(valid_slab_geometry<64, 64, 64>);
+static_assert(!valid_slab_geometry<64, 0, 64>);
+static_assert(!valid_slab_geometry<std::numeric_limits<std::size_t>::max() / 2 + 1, 2, 1>);
 
 /* ============================================================================
  * Memory resource concept & default implementation
@@ -190,26 +197,26 @@ public:
     constexpr explicit resource_ref(R& resource) noexcept : resource_{std::addressof(resource)} {}
 
     void* allocate(const std::size_t size) {
-        assert(resource_ != nullptr && "resource_ref: no referent");
+        LIBMEM_ASSERT(resource_ != nullptr && "resource_ref: no referent");
         return resource_->allocate(size);
     }
 
     void deallocate(void* ptr, const std::size_t size) noexcept {
-        assert(resource_ != nullptr && "resource_ref: no referent");
+        LIBMEM_ASSERT(resource_ != nullptr && "resource_ref: no referent");
         resource_->deallocate(ptr, size);
     }
 
     void* allocate(const std::size_t size, const std::size_t align)
         requires aligned_memory_resource<R>
     {
-        assert(resource_ != nullptr && "resource_ref: no referent");
+        LIBMEM_ASSERT(resource_ != nullptr && "resource_ref: no referent");
         return resource_->allocate(size, align);
     }
 
     void deallocate(void* ptr, const std::size_t size, const std::size_t align) noexcept
         requires aligned_memory_resource<R>
     {
-        assert(resource_ != nullptr && "resource_ref: no referent");
+        LIBMEM_ASSERT(resource_ != nullptr && "resource_ref: no referent");
         resource_->deallocate(ptr, size, align);
     }
 

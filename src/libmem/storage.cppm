@@ -45,7 +45,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:storage;
 
@@ -515,11 +515,11 @@ public:
     fixed_storage()
         requires std::default_initializable<Resource>
         : slots_{detail::allocate_slots<T, Align>(resource_, N)} {
-        assert(slots_ != nullptr && "fixed_storage: resource could not supply the slots");
+        LIBMEM_ASSERT(slots_ != nullptr && "fixed_storage: resource could not supply the slots");
     }
 
     explicit fixed_storage(Resource resource) : resource_{std::move(resource)}, slots_{detail::allocate_slots<T, Align>(resource_, N)} {
-        assert(slots_ != nullptr && "fixed_storage: resource could not supply the slots");
+        LIBMEM_ASSERT(slots_ != nullptr && "fixed_storage: resource could not supply the slots");
     }
 
     fixed_storage(const fixed_storage&) = delete;
@@ -644,7 +644,7 @@ public:
      *      and no live object remains in the current block.
      */
     void adopt(const storage_block<T> block) noexcept {
-        assert(block.data != nullptr && "dynamic_storage: cannot adopt an empty block");
+        LIBMEM_ASSERT(block.data != nullptr && "dynamic_storage: cannot adopt an empty block");
         detail::free_slots<T, Align>(resource_, slots_, capacity_);
         slots_ = block.data;
         capacity_ = block.capacity;
@@ -745,7 +745,7 @@ public:
      */
     [[nodiscard]] storage_block<T> reserve_block(const size_type n) {
         const size_type target{detail::next_capacity<T>(capacity_, n)};
-        assert(target > N && "small_storage: a reserved block must be larger than the inline array");
+        LIBMEM_ASSERT(target > N && "small_storage: a reserved block must be larger than the inline array");
 
         T* ptr{detail::allocate_slots<T, Align>(resource_, target)};
         if (!ptr) {
@@ -759,8 +759,8 @@ public:
      * @pre The container has already relocated its live elements into `block`.
      */
     void adopt(const storage_block<T> block) noexcept {
-        assert(block.data != nullptr && "small_storage: cannot adopt an empty block");
-        assert(block.data != inline_data() && "small_storage: cannot adopt the inline array");
+        LIBMEM_ASSERT(block.data != nullptr && "small_storage: cannot adopt an empty block");
+        LIBMEM_ASSERT(block.data != inline_data() && "small_storage: cannot adopt the inline array");
 
         release();
         slots_ = block.data;
@@ -772,7 +772,7 @@ public:
      * @pre `block` holds no live objects and came from `reserve_block`.
      */
     void discard(const storage_block<T> block) noexcept {
-        assert(block.data != inline_data() && "small_storage: the inline array is not a reserved block");
+        LIBMEM_ASSERT(block.data != inline_data() && "small_storage: the inline array is not a reserved block");
         detail::free_slots<T, Align>(resource_, block.data, block.capacity);
     }
 
@@ -818,6 +818,8 @@ private:
     alignas(Align) std::byte inline_slots_[N * sizeof(T)];
 
     T* inline_data() noexcept { return reinterpret_cast<T*>(inline_slots_); }
+    /* Contract predicates see `this` as const. */
+    const T* inline_data() const noexcept { return reinterpret_cast<const T*>(inline_slots_); }
 
     /** @brief Free the spilled block, if any, and fall back to the inline slots. */
     void release() noexcept {
@@ -850,7 +852,7 @@ private:
 export template <growable_storage S> bool relocate_grow(S& store, const typename S::size_type min_capacity, const typename S::size_type live) {
     using T = typename S::value_type;
 
-    assert(live <= store.capacity() && "relocate_grow: more live elements than slots");
+    LIBMEM_ASSERT(live <= store.capacity() && "relocate_grow: more live elements than slots");
 
     if (store.capacity() >= min_capacity) {
         return true;

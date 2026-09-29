@@ -22,7 +22,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:multislab;
 
@@ -83,7 +83,7 @@ template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, std::size_t BlockA
  */
 export template <std::size_t BlockSize, std::uint32_t BlocksPerSlab, memory_resource Resource = default_resource, shrink_policy Policy = threshold_policy,
     std::size_t BlockAlign = default_alignment>
-    requires valid_block_geometry<BlockSize, BlockAlign> && (BlocksPerSlab > 0)
+    requires valid_slab_geometry<BlockSize, BlocksPerSlab, BlockAlign>
 class multislab {
     using node_type = detail::slab_node<BlockSize, BlocksPerSlab, BlockAlign>;
     using slab_type = typename node_type::slab_type;
@@ -155,16 +155,18 @@ public:
 
     /**
      * @brief Release a block previously obtained from `allocate()`.
-     * @pre `ptr` was allocated from this multislab and has not been double-freed.
+     * @pre `ptr` is a live block of this multislab. A violation is rejected
+     *      without touching any state: a foreign or misaligned pointer, or a double free.
      * @note O(S): finds the owning slab by scanning. Prefer `deallocate(iterator)`
      *       when a position is at hand.
      */
     void deallocate(void* ptr) noexcept {
-        assert(ptr != nullptr);
-
         node_type* node{find_owner(ptr)};
-        assert(node != nullptr && "pointer not owned by this allocator");
-
+        const bool ours{node != nullptr && node->allocator.owns(ptr)};
+        LIBMEM_ASSERT(ours && "multislab: pointer is not a block of this allocator");
+        if (!ours) [[unlikely]] {
+            return;
+        }
         release(node, node->allocator.index_of(ptr));
     }
 
@@ -307,10 +309,14 @@ public:
 
     /**
      * @brief Release the block `pos` points at, in O(1).
-     * @pre `pos` is dereferenceable. Iterators to other blocks stay valid.
+     * @pre `pos` is dereferenceable and its block live; rejected like `deallocate(ptr)` otherwise.
+     *      Iterators to other blocks stay valid.
      */
     void deallocate(const iterator& pos) noexcept {
-        assert(pos != end());
+        LIBMEM_ASSERT(pos != end());
+        if (pos == end()) [[unlikely]] {
+            return;
+        }
         release(pos.node_, pos.slab_iter_.index());
     }
 
@@ -358,7 +364,7 @@ private:
 
         node_type* node{active_};
         const auto alloc{node->allocator.allocate_at()};
-        assert(alloc.ptr != nullptr && "a slab on the active list has no free slot");
+        LIBMEM_ASSERT(alloc.ptr != nullptr && "a slab on the active list has no free slot");
 
         if (node->used++ == 0) {
             --empty_count_;
@@ -370,11 +376,13 @@ private:
     }
 
     void release(node_type* node, const std::uint32_t index) noexcept {
+        /* First: a rejected release must not move the node or count it down. */
+        if (!node->allocator.deallocate_at(index)) [[unlikely]] {
+            return;
+        }
         if (node->full()) [[unlikely]] {
             move_to_active(node);
         }
-
-        node->allocator.deallocate_at(index);
         node->used--;
 
         /* Became empty: apply shrink policy. */
@@ -428,20 +436,27 @@ private:
             return false;
         }
 
-        /* Allocate the node. */
-        void* node_mem{resource_.allocate(sizeof(node_type))};
-        if (!node_mem) [[unlikely]] {
+        /* Owns the node memory until the node is built, so a failing or throwing
+         * slab allocation cannot leak it. */
+        struct node_memory {
+            multislab& owner;
+            void* ptr;
+            ~node_memory() {
+                if (ptr) {
+                    owner.resource_.deallocate(ptr, sizeof(node_type));
+                }
+            }
+        } node_mem{*this, resource_.allocate(sizeof(node_type))};
+        if (!node_mem.ptr) [[unlikely]] {
             return false;
         }
 
-        /* Allocate the slab backing memory. */
         void* slab_mem{allocate_slab_memory()};
         if (!slab_mem) [[unlikely]] {
-            resource_.deallocate(node_mem, sizeof(node_type));
             return false;
         }
 
-        auto* node{::new (node_mem) node_type{slab_mem, slab_memory_size}};
+        auto* node{::new (std::exchange(node_mem.ptr, nullptr)) node_type{slab_mem, slab_memory_size}};
         push_front<&node_type::space>(active_, node);
         push_front<&node_type::all>(nodes_, node);
 

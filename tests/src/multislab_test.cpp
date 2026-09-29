@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <new>
 #include <ranges>
 #include <vector>
 
@@ -508,4 +509,66 @@ TEST(MultislabTest, deallocate_through_the_allocate_at_iterator) {
     EXPECT_EQ(*ms.begin(), kept.ptr);
     ms.deallocate(kept.it);
     EXPECT_EQ(ms.empty_slab_count(), 1u);
+}
+
+namespace {
+
+/* counting_resource whose slab-memory (aligned) allocation throws, after the node header was taken. */
+struct slab_throwing_resource : counting_resource {
+    using counting_resource::allocate;
+    void* allocate(const std::size_t, const std::size_t) { throw std::bad_alloc{}; }
+};
+
+} // namespace
+
+TEST(MultislabTest, grow_releases_the_node_when_the_slab_allocation_throws) {
+    stats st{};
+    {
+        multislab<block, 4, slab_throwing_resource> ms{slab_throwing_resource{{&st}}};
+        EXPECT_THROW(static_cast<void>(ms.allocate()), std::bad_alloc);
+        EXPECT_EQ(ms.slab_count(), 0u);
+    }
+    EXPECT_EQ(st.live_bytes, 0u);
+    EXPECT_EQ(st.allocs, st.frees);
+}
+
+/*
+ * A double free, a foreign or misaligned pointer, and end() are rejected without
+ * touching the bookkeeping. Before, a double free counted the slab down to empty
+ * with a block still live and released it.
+ */
+TEST(MultislabTest, bad_deallocate_is_rejected) {
+    multislab<block, 4> ms{threshold_policy{.max_empty_reserve = 0}};
+    std::array<void*, 5> blocks{};
+    for (auto& b : blocks) {
+        b = ms.allocate();
+        ASSERT_NE(b, nullptr);
+    }
+    std::int32_t foreign{};
+    void* const misaligned{static_cast<std::byte*>(blocks[1]) + 1};
+
+#ifdef NDEBUG
+    ms.deallocate(blocks[0]);
+    ms.deallocate(blocks[0]);
+    ms.deallocate(&foreign);
+    ms.deallocate(misaligned);
+    ms.deallocate(decltype(ms.begin()){});
+    ms.deallocate(blocks[1]);
+    ms.deallocate(blocks[2]);
+
+    /* blocks[3] and blocks[4] are still live, so no slab was released. */
+    EXPECT_EQ(ms.slab_count(), 2u);
+    EXPECT_EQ(std::ranges::distance(ms.begin(), ms.end()), 2);
+    ms.deallocate(blocks[3]);
+    ms.deallocate(blocks[4]);
+#else
+    ms.deallocate(blocks[0]);
+    EXPECT_DEATH(ms.deallocate(blocks[0]), "double free");
+    EXPECT_DEATH(ms.deallocate(&foreign), "not a block of this allocator");
+    EXPECT_DEATH(ms.deallocate(misaligned), "not a block of this allocator");
+    EXPECT_DEATH(ms.deallocate(decltype(ms.begin()){}), "end");
+    for (std::size_t i{1}; i < blocks.size(); ++i) {
+        ms.deallocate(blocks[i]);
+    }
+#endif
 }

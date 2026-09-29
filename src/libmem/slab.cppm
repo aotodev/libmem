@@ -16,7 +16,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:slab;
 
@@ -42,24 +42,22 @@ namespace detail {
 
 /** @brief Compute the number of bitmap words needed for `block_count` blocks. */
 consteval std::size_t words_for(const std::uint32_t block_count) noexcept {
-    return (block_count + bitmap_word_bits - 1) / bitmap_word_bits;
+    return (std::size_t{block_count} + bitmap_word_bits - 1) / bitmap_word_bits;
 }
 
 /**
  * @brief Find the first free (zero) bit across `Words` bitmap words.
- * @return Index of the free bit, or -1 if all bits are set.
+ * @return Index of the free bit, or `capacity` if none is below it.
+ * @pre Bits at or above `capacity` are clear.
  */
-template <std::size_t Words> constexpr std::int32_t bitmap_find_free(const std::array<std::uint64_t, Words>& bitmap, const std::uint32_t capacity) noexcept {
+template <std::size_t Words> constexpr std::uint32_t bitmap_find_free(const std::array<std::uint64_t, Words>& bitmap, const std::uint32_t capacity) noexcept {
     for (std::size_t i{0}; i < Words; ++i) {
-        if (~bitmap[i]) {
-            const auto bit = static_cast<std::uint32_t>(std::countr_zero(static_cast<std::uint64_t>(~bitmap[i])));
-            const std::uint32_t index{static_cast<std::uint32_t>(i) * bitmap_word_bits + bit};
-            if (index < capacity) {
-                return static_cast<std::int32_t>(index);
-            }
+        if (const std::uint64_t free{~bitmap[i]}) {
+            const std::size_t index{i * bitmap_word_bits + static_cast<std::size_t>(std::countr_zero(free))};
+            return index < capacity ? static_cast<std::uint32_t>(index) : capacity;
         }
     }
-    return -1;
+    return capacity;
 }
 
 /** @brief Test whether a bit is set. */
@@ -94,7 +92,7 @@ template <std::size_t Words> constexpr void bitmap_clear(std::array<std::uint64_
  * shift where `BlockSize` is a power of two, and to a multiply otherwise.
  */
 export template <std::size_t BlockSize, std::uint32_t MaxBlocks, std::size_t BlockAlign = default_alignment>
-    requires valid_block_geometry<BlockSize, BlockAlign> && (MaxBlocks > 0)
+    requires valid_slab_geometry<BlockSize, MaxBlocks, BlockAlign>
 class slab {
     static constexpr std::size_t bitmap_words{detail::words_for(MaxBlocks)};
 
@@ -107,8 +105,8 @@ public:
     /**
      * @brief Construct from a user-provided memory region.
      * @param memory      Base pointer to the backing storage.
-     * @param memory_size Size of the backing storage (must be >= `required_memory`).
-     * @pre `memory != nullptr && memory_size >= required_memory`.
+     * @param memory_size Size of the backing storage; blocks past `MaxBlocks` go unused.
+     * @pre `memory != nullptr && memory_size >= BlockSize`.
      * @pre `memory` is at least `BlockAlign`-aligned.
      *
      * @warning Blocks are `memory + index * BlockSize`, so they inherit the base's alignment;
@@ -116,13 +114,12 @@ public:
      *          storage.
      */
     constexpr slab(void* memory, const std::size_t memory_size) noexcept
-        : memory_{static_cast<std::byte*>(memory)}, block_count_{static_cast<std::uint32_t>(memory_size / BlockSize)} {
-        assert(memory != nullptr);
-        assert(memory_size >= BlockSize);
-        assert(block_count_ <= MaxBlocks);
+        : memory_{static_cast<std::byte*>(memory)}, block_count_{static_cast<std::uint32_t>(std::min(memory_size / BlockSize, std::size_t{MaxBlocks}))} {
+        LIBMEM_ASSERT(memory != nullptr);
+        LIBMEM_ASSERT(block_count_ > 0 && "slab: memory_size is smaller than one block");
         /* Short-circuited: reinterpret_cast is ill-formed in constant evaluation. */
-        assert((std::is_constant_evaluated() || reinterpret_cast<std::uintptr_t>(memory) % BlockAlign == 0) &&
-               "slab: backing memory must be aligned to BlockAlign");
+        LIBMEM_ASSERT((std::is_constant_evaluated() || reinterpret_cast<std::uintptr_t>(memory) % BlockAlign == 0) &&
+                      "slab: backing memory must be aligned to BlockAlign");
     }
 
     /**
@@ -150,11 +147,10 @@ public:
      * @return `{ptr, index}` on success, `{nullptr, 0}` when the slab is full.
      */
     [[nodiscard]] constexpr allocation allocate_at() noexcept {
-        const auto found{detail::bitmap_find_free(bitmap_, block_count_)};
-        if (found < 0) [[unlikely]] {
+        const auto index{detail::bitmap_find_free(bitmap_, block_count_)};
+        if (index == block_count_) [[unlikely]] {
             return {};
         }
-        const auto index{static_cast<std::uint32_t>(found)};
         detail::bitmap_set(bitmap_, index);
         return {index_to_ptr(index), index};
     }
@@ -162,34 +158,41 @@ public:
     /**
      * @brief Release a previously allocated block.
      * @param ptr Pointer previously returned by `allocate()`.
-     * @pre `ptr` was returned by this slab's `allocate()` and has not been double-freed.
+     * @pre `ptr` is an allocated block of this slab.
+     * @return `false`, leaving the slab untouched, when the precondition does not hold.
      */
-    constexpr void deallocate(void* ptr) noexcept {
-        assert(ptr != nullptr);
-        deallocate_at(index_of(ptr));
+    bool deallocate(void* ptr) noexcept {
+        const bool ours{owns(ptr)};
+        LIBMEM_ASSERT(ours && "slab: pointer is not a block of this slab");
+        return ours && deallocate_at(unchecked_index_of(ptr));
     }
 
     /**
      * @brief Release the block at bit-index `index`, as reported by `allocate_at()` or an iterator.
      * @pre The block at `index` is allocated.
+     * @return `false`, leaving the slab untouched, when the precondition does not hold.
      */
-    constexpr void deallocate_at(const std::uint32_t index) noexcept {
-        assert(index < block_count_);
-        assert(detail::bitmap_test(bitmap_, index) && "double-free detected");
+    constexpr bool deallocate_at(const std::uint32_t index) noexcept {
+        const bool live{index < block_count_ && detail::bitmap_test(bitmap_, index)};
+        LIBMEM_ASSERT(live && "slab: block is not allocated (double free?)");
+        if (!live) [[unlikely]] {
+            return false;
+        }
         detail::bitmap_clear(bitmap_, index);
+        return true;
     }
 
     /**
      * @brief Bit-index of the block at `ptr`.
      * @pre `owns(ptr)`.
      */
-    constexpr std::uint32_t index_of(const void* ptr) const noexcept {
-        assert(owns(ptr));
-        return static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
+    std::uint32_t index_of(const void* ptr) const noexcept {
+        LIBMEM_ASSERT(owns(ptr));
+        return unchecked_index_of(ptr);
     }
 
-    /** @brief Test whether `ptr` belongs to this slab's memory region. */
-    constexpr bool owns(const void* ptr) const noexcept {
+    /** @brief Test whether `ptr` is a block of this slab: in range and on a block boundary. */
+    bool owns(const void* ptr) const noexcept {
         const auto p{reinterpret_cast<std::uintptr_t>(ptr)};
         const auto base{reinterpret_cast<std::uintptr_t>(memory_)};
         const auto end{base + static_cast<std::uintptr_t>(block_count_) * BlockSize};
@@ -307,6 +310,10 @@ private:
     std::array<std::uint64_t, bitmap_words> bitmap_{};
 
     constexpr void* index_to_ptr(const std::uint32_t index) const noexcept { return static_cast<void*>(memory_ + static_cast<std::size_t>(index) * BlockSize); }
+
+    std::uint32_t unchecked_index_of(const void* ptr) const noexcept {
+        return static_cast<std::uint32_t>((reinterpret_cast<std::uintptr_t>(ptr) - reinterpret_cast<std::uintptr_t>(memory_)) / BlockSize);
+    }
 
     /** @brief Index of the lowest set bit of `word`, the `word_idx`-th bitmap word. */
     static constexpr std::uint32_t first_in(const std::size_t word_idx, const std::uint64_t word) noexcept {

@@ -82,7 +82,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:sparse_set;
 
@@ -323,7 +323,7 @@ public:
      */
     constexpr bool reserve_for(const Id& id) {
         const size_type at{to_index(id)};
-        assert(at != npos && "sparse_set: id maps to the reserved npos subscript");
+        LIBMEM_ASSERT(at != npos && "sparse_set: id maps to the reserved npos subscript");
 
         return sparse_.reserve_for(at);
     }
@@ -340,7 +340,7 @@ public:
 
     /** @brief The id at dense position `index`. */
     constexpr const Id& operator[](const size_type index) const noexcept {
-        assert(index < size_ && "sparse_set: dense index out of range");
+        LIBMEM_ASSERT(index < size_ && "sparse_set: dense index out of range");
         return dense_.data()[index];
     }
 
@@ -376,10 +376,10 @@ public:
      * @pre `id != null_id_v<Id>`.
      */
     constexpr insert_result insert(const Id& id) {
-        assert(!(id == null_id_v<Id>) && "sparse_set: the null id is reserved and not insertable");
+        LIBMEM_ASSERT(!(id == null_id_v<Id>) && "sparse_set: the null id is reserved and not insertable");
 
         const size_type at{to_index(id)};
-        assert(at != npos && "sparse_set: id maps to the reserved npos subscript");
+        LIBMEM_ASSERT(at != npos && "sparse_set: id maps to the reserved npos subscript");
 
         if (const size_type existing{sparse_.get(at)}; existing != npos) {
             return {existing, false};
@@ -419,7 +419,7 @@ public:
             return {};
         }
 
-        assert(size_ > 0);
+        LIBMEM_ASSERT(size_ > 0);
 
         Id* dense{dense_.data()};
         const size_type last{size_ - 1};
@@ -539,7 +539,7 @@ private:
      * @pre This dense array holds no live ids, and `other.sparse_` has already been drained.
      */
     constexpr void adopt_dense(sparse_set& other) noexcept {
-        assert(other.size_ <= dense_.capacity() && "sparse_set: source does not fit the destination slots");
+        LIBMEM_ASSERT(other.size_ <= dense_.capacity() && "sparse_set: source does not fit the destination slots");
 
         detail::relocate_n(other.dense_.data(), other.size_, dense_.data());
         size_ = std::exchange(other.size_, 0);
@@ -771,7 +771,7 @@ public:
      */
     constexpr auto& at(this auto&& self, const Id& id) noexcept {
         auto* found{self.find(id)};
-        assert(found != nullptr && "sparse_map: no entry for this id");
+        LIBMEM_ASSERT(found != nullptr && "sparse_map: no entry for this id");
         return *found;
     }
 
@@ -847,7 +847,7 @@ public:
             }
         }
 
-        assert(keys_.size() == at + 1 && "sparse_map: key insert did not land where the payload did");
+        LIBMEM_ASSERT(keys_.size() == at + 1 && "sparse_map: key insert did not land where the payload did");
         return {slot, true};
     }
 
@@ -967,7 +967,7 @@ private:
      */
     constexpr void adopt_values(sparse_map& other) noexcept {
         const size_type count{other.keys_.size()};
-        assert(count <= values_.capacity() && "sparse_map: source does not fit the destination slots");
+        LIBMEM_ASSERT(count <= values_.capacity() && "sparse_map: source does not fit the destination slots");
 
         detail::relocate_n(other.values_.data(), count, values_.data());
         std::destroy_n(other.values_.data(), count);

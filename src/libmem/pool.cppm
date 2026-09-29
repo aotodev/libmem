@@ -27,7 +27,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:pool;
 
@@ -81,10 +81,12 @@ template <typename T> consteval std::uint32_t default_pool_blocks_per_slab() noe
 export struct slab_limit {
     std::uint32_t value{};
 
-    /* Non-explicit and integral-taking, so `slab_limit{4}` needs no `u` suffix. */
     constexpr slab_limit() noexcept = default;
 
-    template <std::integral N> constexpr slab_limit(const N count) noexcept : value{static_cast<std::uint32_t>(count)} {} // NOLINT(google-explicit-constructor)
+    /* Explicit, so `pool<int> p(4)` does not compile. Any integral, so `slab_limit{4}` needs no `u` suffix. */
+    template <std::integral N> constexpr explicit slab_limit(const N count) noexcept : value{static_cast<std::uint32_t>(count)} {
+        LIBMEM_ASSERT(std::in_range<std::uint32_t>(count) && "slab_limit: count must fit in std::uint32_t");
+    }
 
     constexpr bool operator==(const slab_limit&) const noexcept = default;
 };
@@ -381,13 +383,14 @@ public:
 
     /**
      * @brief Destroy the element referenced by `it` and free its slot.
+     * @pre `it` is dereferenceable.
      * @return Iterator pointing to the element following the erased one,
      *         or `end()` if `it` referenced the last live element.
      *
      * Iterators and pointers to other elements remain valid.
      */
     iterator erase(const_iterator it) noexcept(std::is_nothrow_destructible_v<T>) {
-        assert(size_ > 0);
+        LIBMEM_ASSERT(it != end() && "pool: erase(end())");
 
         pool_iterator inner{it.inner_};
         pool_iterator next{inner};

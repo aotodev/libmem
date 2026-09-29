@@ -22,7 +22,7 @@
  */
 module;
 
-#include <cassert>
+#include "assert.hpp"
 
 export module libmem:typed_arena;
 
@@ -63,7 +63,7 @@ public:
      */
     constexpr typed_arena(const std::span<std::byte> buffer, const std::size_t align = default_alignment) noexcept
         : begin_{buffer.data()}, end_{buffer.data() + buffer.size()}, cursor_{buffer.data()}, default_alignment_{align} {
-        assert(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
+        LIBMEM_ASSERT(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
     }
 
     /**
@@ -73,8 +73,8 @@ public:
      */
     inline explicit typed_arena(const std::size_t size, const std::size_t align = default_alignment)
         : begin_{new std::byte[size]}, end_{begin_ + size}, cursor_{begin_}, default_alignment_{align}, owns_buffer_{true} {
-        assert(size > 0);
-        assert(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
+        LIBMEM_ASSERT(size > 0);
+        LIBMEM_ASSERT(align > 0 && (align & (align - 1)) == 0 && "alignment must be a power of two");
     }
 
     typed_arena(const typed_arena&) = delete;
@@ -115,7 +115,7 @@ public:
      *       any required cleanup.
      */
     [[nodiscard]] inline void* allocate(const std::size_t bytes, const std::size_t alignment) noexcept {
-        assert(alignment > 0 && (alignment & (alignment - 1)) == 0 && "alignment must be a power of two");
+        LIBMEM_ASSERT(alignment > 0 && (alignment & (alignment - 1)) == 0 && "alignment must be a power of two");
 
         const auto current{reinterpret_cast<std::uintptr_t>(cursor_)};
         const auto aligned{(current + alignment - 1) & ~static_cast<std::uintptr_t>(alignment - 1)};
